@@ -47,6 +47,7 @@ pub struct Runtime {
     trow: Vec<f32>,
     logits: Vec<f32>,
     scores: Vec<f32>,
+    denoms: Vec<f32>,
     kcache: Vec<f32>,
     vcache: Vec<f32>,
     rope_c: Vec<f32>,
@@ -92,7 +93,8 @@ impl Runtime {
             tmp_p: vec![0.0; c.n_layers * c.ple_dim],
             trow: vec![0.0; c.n_layers * c.ple_dim],
             logits: vec![0.0; head_rows],
-            scores: vec![0.0; c.seq_len],
+            scores: vec![0.0; c.n_heads * c.seq_len],
+            denoms: vec![0.0; c.n_heads],
             kcache: vec![0.0; c.n_layers * c.seq_len * c.dim],
             vcache: vec![0.0; c.n_layers * c.seq_len * c.dim],
             rope_c,
@@ -144,7 +146,7 @@ impl Runtime {
 
         let Self {
             x, h, qkv, att, g1, g2, ple, tmp_p, trow, logits, scores, kcache, vcache,
-            rope_c, rope_s, head8, xq, last_argmax, pos: rpos, head_rows,
+            rope_c, rope_s, head8, xq, denoms, last_argmax, pos: rpos, head_rows,
             profiling: _, profile, ..
         } = self;
 
@@ -193,35 +195,49 @@ impl Runtime {
             let kc = &kcache[kbase..kbase + s * d];
             let vc = &vcache[kbase..kbase + s * d];
             let scale = 1.0 / (dh as f32).sqrt();
-            for hh in 0..nh {
-                let qh = &qv[hh * dh..(hh + 1) * dh];
-                let ao = &mut att[hh * dh..(hh + 1) * dh];
-                for a in ao.iter_mut() {
-                    *a = 0.0;
+            for t in 0..=pos {
+                let kt = &kc[t * d..t * d + d];
+                for hh in 0..nh {
+                    scores[hh * s + t] = kernels::dot_f32(
+                        &qv[hh * dh..(hh + 1) * dh],
+                        &kt[hh * dh..(hh + 1) * dh],
+                        avx2,
+                    ) * scale;
                 }
+            }
+            for hh in 0..nh {
+                let sc = &mut scores[hh * s..(hh + 1) * s];
                 let mut maxs = -1e30f32;
                 for t in 0..=pos {
-                    let kt = &kc[t * d + hh * dh..t * d + hh * dh + dh];
-                    let mut dot = 0.0f32;
-                    for i in 0..dh {
-                        dot += qh[i] * kt[i];
-                    }
-                    dot *= scale;
-                    scores[t] = dot;
-                    if dot > maxs {
-                        maxs = dot;
+                    if sc[t] > maxs {
+                        maxs = sc[t];
                     }
                 }
                 let mut denom = 0.0f32;
                 for t in 0..=pos {
-                    let w = (scores[t] - maxs).exp();
+                    let w = (sc[t] - maxs).exp();
+                    sc[t] = w;
                     denom += w;
-                    let vt = &vc[t * d + hh * dh..t * d + hh * dh + dh];
-                    for i in 0..dh {
-                        ao[i] += w * vt[i];
-                    }
                 }
-                for a in ao.iter_mut() {
+                denoms[hh] = denom;
+            }
+            for a in att.iter_mut() {
+                *a = 0.0;
+            }
+            for t in 0..=pos {
+                let vt = &vc[t * d..t * d + d];
+                for hh in 0..nh {
+                    kernels::fma_broadcast(
+                        &mut att[hh * dh..(hh + 1) * dh],
+                        scores[hh * s + t],
+                        &vt[hh * dh..(hh + 1) * dh],
+                        avx2,
+                    );
+                }
+            }
+            for hh in 0..nh {
+                let denom = denoms[hh];
+                for a in &mut att[hh * dh..(hh + 1) * dh] {
                     *a /= denom;
                 }
             }

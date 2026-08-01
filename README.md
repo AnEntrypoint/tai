@@ -63,11 +63,11 @@ model):
 
 | threads | tok/s | ms/token |
 |---:|---:|---:|
-| 1 | 2409 | 0.4 |
-| 2 | 2245 | 0.4 |
-| 4 | 2689 | 0.4 |
-| 8 | 2667 | 0.4 |
-| 16 | 2385 | 0.4 |
+| 1 | 2204 | 0.5 |
+| 2 | 2164 | 0.5 |
+| 4 | 2551 | 0.4 |
+| 8 | 2669 | 0.4 |
+| 16 | 1883 | 0.5 |
 
 Baselines on the same machine and model: the C host runtime (`bench.c`, -O3)
 285 tok/s, tai's scalar fallback 240 tok/s, tai with the fp32 AVX2 head
@@ -76,6 +76,11 @@ Baselines on the same machine and model: the C host runtime (`bench.c`, -O3)
 from a Ryzen 7 6800H (8C/16T); `--threads 0` uses physical core count, and
 more than 8 threads buys nothing on this part. For reference, the same model
 runs at 9.5 tok/s on an ESP32-S3.
+
+Attention is a fused single pass over the KV cache for all heads with AVX2
+score dots and value accumulation; at long context (pos ~480, where attention
+dominates) it measures 1671 tok/s against 1436 tok/s for the per-head scalar
+traversal it replaced (+16% end to end).
 
 The int8 head is the same activation-quantization trick the ESP32 runtime
 ships: activations are quantized to int8 once per token and each head row is

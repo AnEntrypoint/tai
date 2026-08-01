@@ -251,3 +251,74 @@ mod avx2_int8 {
         total
     }
 }
+
+pub fn dot_f32(a: &[f32], b: &[f32], avx2: bool) -> f32 {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        return unsafe { avx2_attn::dot_f32_avx2(a, b) };
+    }
+    let mut total = 0.0f32;
+    for i in 0..a.len() {
+        total += a[i] * b[i];
+    }
+    total
+}
+
+pub fn fma_broadcast(dst: &mut [f32], w: f32, src: &[f32], avx2: bool) {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        unsafe {
+            avx2_attn::fma_broadcast_avx2(dst, w, src);
+        }
+        return;
+    }
+    for i in 0..dst.len() {
+        dst[i] += w * src[i];
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+mod avx2_attn {
+    use core::arch::x86_64::*;
+
+    #[target_feature(enable = "avx2", enable = "fma")]
+    pub unsafe fn dot_f32_avx2(a: &[f32], b: &[f32]) -> f32 {
+        let n = a.len() & !7;
+        let mut acc = _mm256_setzero_ps();
+        let mut i = 0;
+        while i < n {
+            acc = _mm256_fmadd_ps(
+                _mm256_loadu_ps(a.as_ptr().add(i)),
+                _mm256_loadu_ps(b.as_ptr().add(i)),
+                acc,
+            );
+            i += 8;
+        }
+        let s = _mm_add_ps(_mm256_castps256_ps128(acc), _mm256_extractf128_ps::<1>(acc));
+        let s = _mm_add_ps(s, _mm_movehl_ps(s, s));
+        let s = _mm_add_ss(s, _mm_shuffle_ps::<1>(s, s));
+        let mut total = _mm_cvtss_f32(s);
+        while i < a.len() {
+            total += *a.get_unchecked(i) * *b.get_unchecked(i);
+            i += 1;
+        }
+        total
+    }
+
+    #[target_feature(enable = "avx2", enable = "fma")]
+    pub unsafe fn fma_broadcast_avx2(dst: &mut [f32], w: f32, src: &[f32]) {
+        let wv = _mm256_set1_ps(w);
+        let n = dst.len() & !7;
+        let mut i = 0;
+        while i < n {
+            let d = _mm256_loadu_ps(dst.as_ptr().add(i));
+            let s = _mm256_loadu_ps(src.as_ptr().add(i));
+            _mm256_storeu_ps(dst.as_mut_ptr().add(i), _mm256_fmadd_ps(wv, s, d));
+            i += 8;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) += w * src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
