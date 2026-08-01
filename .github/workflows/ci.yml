@@ -1,0 +1,16 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked
+      - run: ./target/release/tai verify --model fixtures/model-small.bin --golden fixtures/golden-small.txt
+      - run: ./target/release/tai generate --model fixtures/model-small.bin --prompt-ids 1,2,3 --tokens 8 --seed 1

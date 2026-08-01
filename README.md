@@ -1,88 +1,116 @@
-# Running a 28.9M parameter LLM on an $8 microcontroller
+# tai
 
-<p align="center">
-  Open to Work &nbsp;·&nbsp;
-  <a href="https://x.com/slvDev">𝕏 slvDev</a> &nbsp;·&nbsp;
-  <a href="https://www.linkedin.com/in/slvdev/">LinkedIn</a>
-</p>
+Fast desktop inference for the PLE TinyLM, in Rust.
 
-![28.9M-parameter LLM running on an ESP32-S3](media/esp32-ple-demo.gif)
+tai runs the 28.9M-parameter Per-Layer-Embedding language model from this
+repository on a desktop CPU. The model file is memory-mapped, the int4
+group-quantized matvecs run on AVX2+FMA kernels (with a scalar fallback), and
+the 3.1M-MAC output head is split across every core with rayon. The same
+model generates at 9.5 tok/s on an ESP32-S3; see RESULTS.md for the
+microcontroller story and `tai bench` below for desktop numbers.
 
-This is a 28.9 million parameter language model that generates text on an ESP32-S3,
-a microcontroller that costs about $8. It runs on the chip itself, with nothing
-sent to a server, and it writes each word to a small screen wired to the chip at
-roughly 9 tokens per second. The last language model people ran on a chip like this had 260
-thousand parameters, so this one holds about a hundred times more. It fits because
-most of the model lives in flash instead of RAM, using an idea from Google's Gemma
-models called Per-Layer Embeddings.
+## Quick start
 
-## The numbers
+```bash
+cargo build --release
 
-|              |                                                               |
-| ------------ | ------------------------------------------------------------- |
-| Parameters   | 28.9M stored (25M of them in a flash lookup table)            |
-| Chip         | ESP32-S3, about $8, with 512KB SRAM, 8MB PSRAM and 16MB flash |
-| Speed        | about 9.5 tok/s end to end (9.7 tok/s of pure compute)        |
-| Connectivity | none, everything runs on the device                           |
-| Model size   | 14.9MB at 4-bit                                               |
+# prove the runtime against a PyTorch golden (committed fixture, no training)
+./target/release/tai verify --model fixtures/model-small.bin --golden fixtures/golden-small.txt
 
-## Why it is hard, and how it fits anyway
+# generate; raw token ids work without any tokenizer file
+./target/release/tai generate --model fixtures/model-small.bin --prompt-ids 1,2,3 --tokens 32 --seed 1
 
-A microcontroller has very little fast memory. The ESP32-S3 gives you 512KB of SRAM.
-Normally the whole model has to be reachable from there, which keeps you stuck with
-tiny models, and that is why the previous model on a chip like this had only 260
-thousand parameters.
+# with a trained deploy model and its tokenizer
+./target/release/tai generate \
+  --model firmware/model/model.bin \
+  --tokenizer data/bpe32768.json \
+  --prompt "Once upon a time" \
+  --tokens 200 --temperature 0.8 --top-k 40
 
-The way around it is to stop putting the model in fast memory at all. Most of a
-language model's parameters sit in an embedding table, which the model reads from
-rather than computes on. So you can leave that 25 million row table in slow flash
-and pull only the few rows each token needs, about 450 bytes, while the small part
-that does the actual work stays in fast memory. The large model then costs almost
-nothing to run, because you never load most of it. It just sits in flash and gets
-sampled a little at a time.
-
-That idea is Google's Per-Layer Embeddings, from Gemma 3n and Gemma 4. Here it runs
-on the memory layout of a microcontroller instead of a phone or a GPU. As far as I
-can tell, nobody had tried it on a chip this small.
-
-```
-  SRAM  (fast, tiny)   the "thinking" core, used on every token
-  PSRAM (medium)       the output head and working memory
-  FLASH (huge, slow)   the 25M-param table, about 6 rows read per token (~450 B)
+# throughput across thread counts, with a per-stage profile
+./target/release/tai bench --model firmware/model/model.bin --threads 1,2,4,8,16
 ```
 
-## What it does, and what it does not
+Shared flags: `--threads N` (0 = all cores), `--scalar` (force the scalar
+kernels), `--vocab-cap N` (score only the first N head rows), `--seed`.
 
-The model was trained on TinyStories, so it writes short, simple stories and mostly
-keeps them coherent. It will not answer questions, follow instructions, write code,
-or know facts. That limit comes from the small part of the model that does the
-reasoning, and the memory trick does not change it. What is interesting here is the
-architecture, fitting a large model onto a tiny chip, rather than what a 28.9 million
-parameter model can say.
+Sampling follows `src/model.py`: temperature scaling, top-k masking (default
+40), softmax, multinomial. `--temperature 0` is greedy.
 
-## Running it yourself
+## Model format
 
-The firmware, the wiring, and the flashing steps live in
-[`firmware/esp32_llm/README.md`](firmware/esp32_llm/README.md). The training,
-ablation, and quantization code is in `src/` and `experiments/`. The full method,
-the ablations, and the on-chip measurements are written up in
-[`RESULTS.md`](RESULTS.md).
+tai reads the same `PLE1` model.bin the ESP32 firmware uses: a flat,
+mmap-friendly blob of group-wise int4 tensors (fp16 scales, ragged packing)
+plus fp32 norm vectors, fully described by its header. Produce one with the
+Python pipeline:
+
+```bash
+uv sync
+uv run python data/prepare.py --vocab 32768   # TinyStories slice + BPE
+uv run python src/train.py --arm ple ...      # train; see experiments/
+uv run python src/export.py <run-tag>         # firmware/model/model.bin + golden.txt
+```
+
+For a numerics fixture without training, `src/make_ckpt.py` writes a
+random-init checkpoint in the same format (deploy config by default, `--small`
+for the CI fixture).
+
+## Performance
+
+Measured on a 16-core desktop (`tai bench --model firmware/model/model.bin
+--threads 1,2,4,8,16`, 200-token greedy decode of the 28.9M-parameter deploy
+model):
+
+| threads | tok/s | ms/token |
+|---:|---:|---:|
+| 1 | 859 | 1.2 |
+| 2 | 1328 | 0.8 |
+| 4 | 1624 | 0.6 |
+| 8 | 1810 | 0.6 |
+| 16 | 1454 | 0.7 |
+
+Baselines on the same machine and model: the C host runtime (`bench.c`, -O3)
+273 tok/s, tai's own scalar fallback 234 tok/s. The AVX2 kernel alone is 3.7x
+the scalar path; threading the output head peaks at 8 cores (~2.1x more) where
+the 0.3 ms head scan stops covering the fork-join overhead. For reference, the
+same model runs at 9.5 tok/s on an ESP32-S3.
+
+## Verification
+
+`tai verify` forwards the golden prompt and compares every last-position
+logit against the PyTorch reference exported beside the model, the same check
+`firmware/host_verify/verify.c` runs for the C runtime. On the deploy
+artifact all three (PyTorch, C, Rust) agree to fp print precision
+(max abs diff = 0.00000).
+
+## Layout
+
+```
+tai/                 the Rust desktop runtime
+src/                 training, quantization, export (Python)
+data/prepare.py      dataset and tokenizer generation
+firmware/            ESP32-S3 firmware and host verifiers (the original target)
+experiments/         ablation and deploy scripts
+fixtures/            a tiny committed model so CI and fresh clones can verify
+RESULTS.md           the PLE-on-ESP32 research writeup
+```
+
+## Why it is fast
+
+- mmap: the 14.9MB model is demand-paged straight from disk, never parsed
+  into heap structures
+- AVX2+FMA: int4 nibbles unpack to f32 lanes, 32 columns per iteration
+- rayon: the tied output head (32768 x 96, scanned in full every token) is
+  row-split across cores
+- the dense core is only 559K parameters by design (Per-Layer Embeddings put
+  25M parameters in a sparsely-read table), so per-token compute is ~4M MACs
+- one scratch allocation up front, precomputed RoPE tables, contiguous
+  KV cache
 
 ## Credit
 
-TinyStories is the dataset this trains on: short synthetic stories simple enough
-that a small model can still learn to write coherently (Ronen Eldan and Yuanzhi Li,
-Microsoft Research, [arXiv:2305.07759](https://arxiv.org/abs/2305.07759)). The other
-half is Per-Layer Embeddings, Google's design from the Gemma models, which is what
-lets a big model fit on a small chip.
-
-Andrej Karpathy's [llama2.c](https://github.com/karpathy/llama2.c) is why a lot of
-people, me included, believe you can train a tiny language model and run it in plain
-C at all. This grew out of that.
-
-## How this actually went
-
-I left the messy history in the repo on purpose. That includes a bug I found in my
-own parameter accounting, which had inflated an early number, and the corrected
-result that followed once I fixed it. The commit history and `RESULTS.md` show where
-the numbers moved and why.
+The TinyStories dataset (Ronen Eldan and Yuanzhi Li, Microsoft Research,
+arXiv:2305.07759) and Google's Per-Layer Embeddings design from the Gemma
+models. This repository began as an ESP32-S3 project applying that idea to a
+microcontroller memory hierarchy (see RESULTS.md and LICENSE); tai is its
+desktop Rust runtime. MIT license.

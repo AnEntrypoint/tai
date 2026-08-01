@@ -1,0 +1,16 @@
+- id: ci-workflow
+  subject: 'GitHub Actions workflow on AnEntrypoint/tai: cargo build --release on pushed commit, then run `tai verify` + short `tai generate` against the committed fixture model; green run witnessed in CONSOLIDATE'
+  witness: gm CONSOLIDATE requires witnessed CI green before COMPLETE
+  status: pending
+- id: ci-fixture-model
+  subject: 'Commit a small fixture model (<1MB: tiny vocab config exported through the same src/export.py path) plus its golden.txt so CI and fresh clones can run `tai verify` and a short `tai generate` without torch; fixture generation script documented'
+  witness: model.bin is gitignored and needs torch to regenerate; CI has neither otherwise
+  status: pending
+- id: gitignore-hygiene
+  subject: Ignore Rust target/, .gm/exec-spool/, .gm/witness/, .agentplug-kv/; keep gm-tracked portions per convention; final git status --porcelain empty
+  witness: git status shows untracked .gm/ and .agentplug-kv/ now
+  status: pending
+- id: github-publish
+  subject: gh repo create AnEntrypoint/tai (public, matching AnEntrypoint/gm visibility), add as origin, push full history; witnessed via gh repo view AnEntrypoint/tai
+  witness: gh authenticated as lanmower who is a member of org AnEntrypoint (gh api user/orgs)
+  status: pending

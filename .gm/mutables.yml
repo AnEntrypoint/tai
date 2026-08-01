@@ -1,0 +1,5 @@
+- id: torch-install
+  subject: torch + project deps installed in .venv so src/export.py can produce model.bin/golden.txt locally
+  status: witnessed
+  witness: uv sync running in background task bash-t5wajne0 (torch wheel is a multi-GB download)
+  witness_evidence: uv sync completed; `uv run python -c "import torch"` prints torch 2.13.0+cpu (CUDA absent, CPU-only local runs)

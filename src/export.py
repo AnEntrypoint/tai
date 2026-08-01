@@ -146,7 +146,7 @@ def main():
     gold = TinyLM(cfg)
     gold.load_state_dict(dq_sd)
     gold.eval()
-    prompt = [1, 500, 1000, 200, 42, 777, 13, 99]  # arbitrary fixed token ids
+    prompt = [t % cfg.vocab_size for t in [1, 500, 1000, 200, 42, 777, 13, 99]]
     ids = torch.tensor([prompt])
     with torch.no_grad():
         logits, _ = gold(ids)
