@@ -439,13 +439,16 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
         rt.profiling = true;
         rt.profile.reset();
         let t0 = Instant::now();
+        let mut fwd = 0.0f64;
         let mut decoded = 0usize;
         for _ in 0..a.tokens {
             if rt.pos() >= c.seq_len {
                 break;
             }
             let next = rt.argmax();
+            let f0 = Instant::now();
             rt.forward(&m, next, &pool, avx2);
+            fwd += f0.elapsed().as_secs_f64();
             decoded += 1;
         }
         let elapsed = t0.elapsed().as_secs_f64();
@@ -453,12 +456,15 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
             println!("{tc:>8} {:>12} {:>12}   (no tokens decoded)", "-", "-");
             continue;
         }
+        let n = decoded as f64;
         println!(
-            "{:>8} {:>12.2} {:>12.1}   {}",
+            "{:>8} {:>12.2} {:>12.2}   {} | fwd {:.2} other {:.2}",
             tc,
-            decoded as f64 / elapsed,
-            elapsed * 1000.0 / decoded as f64,
-            rt.profile.report().replace("profile ms/token: ", "")
+            n / elapsed,
+            elapsed * 1000.0 / n,
+            rt.profile.report().replace("profile ms/token: ", ""),
+            fwd * 1000.0 / n,
+            (elapsed - fwd) * 1000.0 / n,
         );
     }
     Ok(0)

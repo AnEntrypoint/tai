@@ -205,15 +205,15 @@ impl ModelFile {
     }
 }
 
-pub struct Int8Head {
+pub struct Int8Mat {
     pub w: Vec<u8>,
     pub scale: Vec<f32>,
     pub rows: usize,
     pub cols: usize,
 }
 
-impl Int8Head {
-    pub fn stage(q: &Qt) -> Result<Int8Head, String> {
+impl Int8Mat {
+    pub fn stage(q: &Qt) -> Result<Int8Mat, String> {
         if q.n_groups != 1 {
             return Err(format!(
                 "int8 head staging needs one group per row, head has {}",
@@ -231,6 +231,6 @@ impl Int8Head {
             }
             scale[r] = crate::kernels::scale_at(q, r, 0);
         }
-        Ok(Int8Head { w, scale, rows: q.rows, cols: q.cols })
+        Ok(Int8Mat { w, scale, rows: q.rows, cols: q.cols })
     }
 }

@@ -63,46 +63,48 @@ model):
 
 | threads | tok/s | ms/token |
 |---:|---:|---:|
-| 1 | 2204 | 0.5 |
-| 2 | 2164 | 0.5 |
-| 4 | 2551 | 0.4 |
-| 8 | 2669 | 0.4 |
-| 16 | 1883 | 0.5 |
+| 1 | 4289 | 0.23 |
+| 2 | 5146 | 0.19 |
+| 4 | 5766 | 0.17 |
+| 8 | 5265 | 0.19 |
+| 16 | 2665 | 0.38 |
 
 Baselines on the same machine and model: the C host runtime (`bench.c`, -O3)
-285 tok/s, tai's scalar fallback 240 tok/s, tai with the fp32 AVX2 head
-(`--fp32-head`) 932 tok/s single-threaded. The default head is int8-on-int8
-(`maddubs`), staged once at load; it is ~4x the fp32 AVX2 head. Numbers are
+247 tok/s, tai's scalar fallback 217 tok/s, tai with fp32 AVX2 matvecs
+(`--fp32-head`) 1973 tok/s at 8 threads. Every matvec runs as an exact
+integer int8 dot by default: weights are unpacked to bytes once at load,
+each matvec input is quantized to int8 once, and rows are computed four at a
+time against shared activation registers (`maddubs`/`madd`). Numbers are
 from a Ryzen 7 6800H (8C/16T); `--threads 0` uses physical core count, and
 more than 8 threads buys nothing on this part. For reference, the same model
 runs at 9.5 tok/s on an ESP32-S3.
 
 Attention is a fused single pass over the KV cache for all heads with AVX2
-score dots and value accumulation; at long context (pos ~480, where attention
-dominates) it measures 1671 tok/s against 1436 tok/s for the per-head scalar
-traversal it replaced (+16% end to end).
+score dots and value accumulation. At long context (pos ~480, where
+attention dominates) the runtime holds 2917 tok/s; the per-head scalar
+traversal this replaced managed 1436.
 
-The int8 head is the same activation-quantization trick the ESP32 runtime
-ships: activations are quantized to int8 once per token and each head row is
-an exact integer dot. Its quality cost, measured with
+The int8-everywhere math is the same activation-quantization trick the ESP32
+runtime ships: activations are quantized to int8 once per matvec and every
+row is an exact integer dot. Its quality cost, measured with
 `firmware/host_verify/ppl.c`'s methodology over 4096 val predictions
 (`tai ppl --model firmware/model/model.bin --val data/val_v32768.bin`):
 
 | runtime | val CE | ppl |
 |---|---:|---:|
-| tai fp32-head | 2.9318 | 18.76 |
-| tai int8-head | 2.9316 | 18.76 |
+| tai fp32 everywhere | 2.9318 | 18.76 |
+| tai int8 everywhere | 2.9320 | 18.76 |
 | C fp32 (llm.h) | 2.9318 | 18.76 |
 | C int8 (llm.h) | 2.9318 | 18.76 |
 
 ## Verification
 
-`tai verify` forwards the golden prompt with the exact fp32 head and compares
+`tai verify` forwards the golden prompt with exact fp32 matvecs and compares
 every last-position logit against the PyTorch reference exported beside the
 model, the same check `firmware/host_verify/verify.c` runs for the C runtime.
 On the deploy artifact all three (PyTorch, C, Rust) agree to fp print
 precision (max abs diff = 0.00000). `tai ppl` measures val perplexity, and is
-how the int8 generation head is validated (above).
+how the int8 generation path is validated (above).
 
 ## Layout
 

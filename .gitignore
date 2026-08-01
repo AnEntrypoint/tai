@@ -26,6 +26,7 @@ videos/
 *.MP4
 
 target/
+.env
 
 .gm/exec-spool/
 .gm/witness/
