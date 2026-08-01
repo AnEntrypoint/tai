@@ -84,6 +84,12 @@ score dots and value accumulation. At long context (pos ~480, where
 attention dominates) the runtime holds 2917 tok/s; the per-head scalar
 traversal this replaced managed 1436.
 
+Reducing head bytes further was measured and rejected: a packed-int4 head
+with in-kernel SIMD unpack (`--i4-head`, bit-identical logits) reads half
+the weight bytes but loses ~18% single-threaded to the unpack ALU work and
+washes out within noise at 4-8 threads on this chip. Staged int8 stays the
+default; the flag remains for bandwidth-poorer hosts.
+
 The int8-everywhere math is the same activation-quantization trick the ESP32
 runtime ships: activations are quantized to int8 once per matvec and every
 row is an exact integer dot. Its quality cost, measured with

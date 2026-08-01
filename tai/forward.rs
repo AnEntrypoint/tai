@@ -101,6 +101,7 @@ pub struct Runtime {
     rope_c: Vec<f32>,
     rope_s: Vec<f32>,
     head8: Option<Int8Mat>,
+    pub i4_head: bool,
     staged: Option<Staged>,
     xq: Vec<i8>,
     scaled: Vec<f32>,
@@ -149,6 +150,7 @@ impl Runtime {
             rope_c,
             rope_s,
             head8,
+            i4_head: false,
             staged,
             xq: vec![0; c.dim.max(c.ffn).max(c.ple_dim)],
             scaled: Vec::with_capacity(head_rows),
@@ -192,8 +194,8 @@ impl Runtime {
 
         let Self {
             x, h, qkv, att, g1, g2, ple, tmp_p, trow, logits, scores, kcache, vcache,
-            rope_c, rope_s, head8, staged, xq, denoms, last_argmax, pos: rpos,
-            head_rows, profiling: _, profile, ..
+            rope_c, rope_s, head8, i4_head, staged, xq, denoms, last_argmax,
+            pos: rpos, head_rows, profiling: _, profile, ..
         } = self;
 
         deq_timed(&m.tok_emb, token, x, &mut profile.deq_ns, profiling);
@@ -332,8 +334,11 @@ impl Runtime {
                 let xq = &mut xq[..x.len()];
                 let xs = kernels::quantize_act(x, xq);
                 let asum = kernels::act_sum(xq);
-                *last_argmax =
-                    matvec_head_int8(h8, xq, asum, xs, logits, *head_rows, pool, avx2);
+                *last_argmax = if *i4_head {
+                    matvec_head_i4(&m.tok_emb, &h8.scale, xq, asum, xs, logits, *head_rows, pool, avx2)
+                } else {
+                    matvec_head_int8(h8, xq, asum, xs, logits, *head_rows, pool, avx2)
+                };
             }
             None => {
                 *last_argmax = matvec_head(&m.tok_emb, x, logits, *head_rows, pool, avx2);
@@ -410,6 +415,91 @@ fn int8_matvec_rows(t8: &Int8Mat, xq: &[i8], asum: i32, xs: f32, r0: usize, r1: 
         on_max(r, v);
         r += 1;
     }
+}
+
+#[inline]
+fn i4_head_rows(
+    q: &Qt,
+    scale: &[f32],
+    xq: &[i8],
+    asum: i32,
+    xs: f32,
+    r0: usize,
+    r1: usize,
+    avx2: bool,
+    y: &mut [f32],
+    on_max: &mut dyn FnMut(usize, f32),
+) {
+    let mut r = r0;
+    while r + 4 <= r1 {
+        let mut d = [0i32; 4];
+        kernels::dot_i4_u8_i8_x4(&q.codes[r * q.row_bytes..], q.row_bytes, xq, q.cols, avx2, &mut d);
+        for k in 0..4 {
+            let v = (d[k] - 8 * asum) as f32 * scale[r + k] * xs;
+            y[r + k - r0] = v;
+            on_max(r + k, v);
+        }
+        r += 4;
+    }
+    while r < r1 {
+        let row = &q.codes[r * q.row_bytes..r * q.row_bytes + q.row_bytes];
+        let mut total = 0i32;
+        for j in 0..q.cols {
+            let b = row[j >> 1];
+            let c = if j & 1 == 1 { b >> 4 } else { b & 0xF };
+            total += c as i32 * xq[j] as i32;
+        }
+        let v = (total - 8 * asum) as f32 * scale[r] * xs;
+        y[r - r0] = v;
+        on_max(r, v);
+        r += 1;
+    }
+}
+
+fn matvec_head_i4(
+    q: &Qt,
+    scale: &[f32],
+    xq: &[i8],
+    asum: i32,
+    xs: f32,
+    y: &mut [f32],
+    rows: usize,
+    pool: &rayon::ThreadPool,
+    avx2: bool,
+) -> usize {
+    let threads = pool.current_num_threads();
+    if threads < 2 || rows * q.cols < (1 << 18) {
+        let mut bv = f32::NEG_INFINITY;
+        let mut bi = 0;
+        i4_head_rows(q, scale, xq, asum, xs, 0, rows, avx2, y, &mut |r, v| {
+            if v > bv {
+                bv = v;
+                bi = r;
+            }
+        });
+        return bi;
+    }
+    let chunk = rows.div_ceil(threads * 4).max(1);
+    pool.install(|| {
+        y[..rows]
+            .par_chunks_mut(chunk)
+            .enumerate()
+            .map(|(ci, ch)| {
+                let r0 = ci * chunk;
+                let r1 = (r0 + ch.len()).min(rows);
+                let mut bv = f32::NEG_INFINITY;
+                let mut bi = 0;
+                i4_head_rows(q, scale, xq, asum, xs, r0, r1, avx2, ch, &mut |r, v| {
+                    if v > bv {
+                        bv = v;
+                        bi = r;
+                    }
+                });
+                (bv, bi)
+            })
+            .reduce(|| (f32::NEG_INFINITY, 0), |a, b| if b.0 > a.0 { b } else { a })
+            .1
+    })
 }
 
 fn matvec_head_int8(

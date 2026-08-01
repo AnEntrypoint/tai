@@ -52,6 +52,8 @@ struct GenArgs {
     scalar: bool,
     #[arg(long)]
     fp32_head: bool,
+    #[arg(long)]
+    i4_head: bool,
 }
 
 #[derive(Args)]
@@ -82,6 +84,8 @@ struct BenchArgs {
     scalar: bool,
     #[arg(long)]
     fp32_head: bool,
+    #[arg(long)]
+    i4_head: bool,
 }
 
 #[derive(Args)]
@@ -258,6 +262,7 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
         rows
     );
     let mut rt = Runtime::new(&m, rows, avx2 && !a.fp32_head);
+    rt.i4_head = a.i4_head;
     let mut rng = StdRng::seed_from_u64(a.seed);
 
     let stdout = std::io::stdout();
@@ -425,6 +430,7 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
     for tc in parse_thread_list(&a.threads)? {
         let pool = build_pool(tc)?;
         let mut rt = Runtime::new(&m, rows, avx2 && !a.fp32_head);
+        rt.i4_head = a.i4_head;
         for &id in &ids {
             rt.forward(&m, id, &pool, avx2);
         }

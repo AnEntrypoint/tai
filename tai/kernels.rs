@@ -223,6 +223,26 @@ pub fn dot_u8_i8(w: &[u8], a: &[i8], avx2: bool) -> i32 {
     total
 }
 
+pub fn dot_i4_u8_i8_x4(packed: &[u8], row_bytes: usize, a: &[i8], cols: usize, avx2: bool, out: &mut [i32; 4]) {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        unsafe {
+            avx2_int8::dot_i4_u8_i8_x4_avx2(packed, row_bytes, a, cols, out);
+        }
+        return;
+    }
+    for r in 0..4 {
+        let row = &packed[r * row_bytes..];
+        let mut total = 0i32;
+        for j in 0..cols {
+            let b = row[j >> 1];
+            let c = if j & 1 == 1 { b >> 4 } else { b & 0xF };
+            total += c as i32 * a[j] as i32;
+        }
+        out[r] = total;
+    }
+}
+
 pub fn dot_u8_i8_x4(w: &[u8], a: &[i8], cols: usize, avx2: bool, out: &mut [i32; 4]) {
     #[cfg(target_arch = "x86_64")]
     if avx2 {
@@ -244,6 +264,61 @@ pub fn dot_u8_i8_x4(w: &[u8], a: &[i8], cols: usize, avx2: bool, out: &mut [i32;
 #[cfg(target_arch = "x86_64")]
 mod avx2_int8 {
     use core::arch::x86_64::*;
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn dot_i4_u8_i8_x4_avx2(packed: &[u8], row_bytes: usize, a: &[i8], cols: usize, out: &mut [i32; 4]) {
+        let mut acc0 = _mm256_setzero_si256();
+        let mut acc1 = _mm256_setzero_si256();
+        let mut acc2 = _mm256_setzero_si256();
+        let mut acc3 = _mm256_setzero_si256();
+        let one = _mm256_set1_epi16(1);
+        let mask = _mm_set1_epi8(0x0F);
+        let mut i = 0;
+        while i + 32 <= cols {
+            let av = _mm256_loadu_si256(a.as_ptr().add(i) as *const __m256i);
+            let b0 = _mm_loadu_si128(packed.as_ptr().add(i >> 1) as *const __m128i);
+            let b1 = _mm_loadu_si128(packed.as_ptr().add(row_bytes + (i >> 1)) as *const __m128i);
+            let b2 = _mm_loadu_si128(packed.as_ptr().add(2 * row_bytes + (i >> 1)) as *const __m128i);
+            let b3 = _mm_loadu_si128(packed.as_ptr().add(3 * row_bytes + (i >> 1)) as *const __m128i);
+            let l0 = _mm_and_si128(b0, mask);
+            let h0 = _mm_and_si128(_mm_srli_epi16::<4>(b0), mask);
+            let w0 = _mm256_set_m128i(_mm_unpackhi_epi8(l0, h0), _mm_unpacklo_epi8(l0, h0));
+            let l1 = _mm_and_si128(b1, mask);
+            let h1 = _mm_and_si128(_mm_srli_epi16::<4>(b1), mask);
+            let w1 = _mm256_set_m128i(_mm_unpackhi_epi8(l1, h1), _mm_unpacklo_epi8(l1, h1));
+            let l2 = _mm_and_si128(b2, mask);
+            let h2 = _mm_and_si128(_mm_srli_epi16::<4>(b2), mask);
+            let w2 = _mm256_set_m128i(_mm_unpackhi_epi8(l2, h2), _mm_unpacklo_epi8(l2, h2));
+            let l3 = _mm_and_si128(b3, mask);
+            let h3 = _mm_and_si128(_mm_srli_epi16::<4>(b3), mask);
+            let w3 = _mm256_set_m128i(_mm_unpackhi_epi8(l3, h3), _mm_unpacklo_epi8(l3, h3));
+            acc0 = _mm256_add_epi32(acc0, _mm256_madd_epi16(_mm256_maddubs_epi16(w0, av), one));
+            acc1 = _mm256_add_epi32(acc1, _mm256_madd_epi16(_mm256_maddubs_epi16(w1, av), one));
+            acc2 = _mm256_add_epi32(acc2, _mm256_madd_epi16(_mm256_maddubs_epi16(w2, av), one));
+            acc3 = _mm256_add_epi32(acc3, _mm256_madd_epi16(_mm256_maddubs_epi16(w3, av), one));
+            i += 32;
+        }
+        let mut totals = [0i32; 4];
+        for (k, acc) in [acc0, acc1, acc2, acc3].iter().enumerate() {
+            let s = _mm_add_epi32(
+                _mm256_castsi256_si128(*acc),
+                _mm256_extracti128_si256::<1>(*acc),
+            );
+            let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0x4E>(s));
+            let s = _mm_add_epi32(s, _mm_shuffle_epi32::<1>(s));
+            totals[k] = _mm_cvtsi128_si32(s);
+        }
+        while i < cols {
+            let a0 = *a.get_unchecked(i) as i32;
+            for k in 0..4 {
+                let b = *packed.get_unchecked(k * row_bytes + (i >> 1));
+                let c = if i & 1 == 1 { b >> 4 } else { b & 0xF };
+                totals[k] += c as i32 * a0;
+            }
+            i += 1;
+        }
+        *out = totals;
+    }
 
     #[target_feature(enable = "avx2")]
     pub unsafe fn dot_u8_i8_x4_avx2(w: &[u8], a: &[i8], cols: usize, out: &mut [i32; 4]) {
