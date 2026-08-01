@@ -14,6 +14,7 @@ path = "tai/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 libm = "0.2"
 memmap2 = "0.9"
+num_cpus = "1"
 rand = "0.9"
 rayon = "1.10"
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }

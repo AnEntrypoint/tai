@@ -23,6 +23,7 @@ enum Cmd {
     Generate(GenArgs),
     Verify(VerifyArgs),
     Bench(BenchArgs),
+    Ppl(PplArgs),
 }
 
 #[derive(Args)]
@@ -49,6 +50,8 @@ struct GenArgs {
     vocab_cap: Option<usize>,
     #[arg(long)]
     scalar: bool,
+    #[arg(long)]
+    fp32_head: bool,
 }
 
 #[derive(Args)]
@@ -77,6 +80,24 @@ struct BenchArgs {
     vocab_cap: Option<usize>,
     #[arg(long)]
     scalar: bool,
+    #[arg(long)]
+    fp32_head: bool,
+}
+
+#[derive(Args)]
+struct PplArgs {
+    #[arg(long)]
+    model: PathBuf,
+    #[arg(long)]
+    val: PathBuf,
+    #[arg(long, default_value_t = 8)]
+    windows: usize,
+    #[arg(long, default_value_t = 0)]
+    threads: usize,
+    #[arg(long)]
+    scalar: bool,
+    #[arg(long)]
+    fp32_head: bool,
 }
 
 pub fn run() -> i32 {
@@ -85,6 +106,7 @@ pub fn run() -> i32 {
         Cmd::Generate(a) => generate(a),
         Cmd::Verify(a) => verify(a),
         Cmd::Bench(a) => bench(a),
+        Cmd::Ppl(a) => ppl(a),
     };
     match result {
         Ok(code) => code,
@@ -136,9 +158,7 @@ fn parse_thread_list(s: &str) -> Result<Vec<usize>, String> {
 
 fn build_pool(threads: usize) -> Result<rayon::ThreadPool, String> {
     let n = if threads == 0 {
-        std::thread::available_parallelism()
-            .map(|v| v.get())
-            .unwrap_or(1)
+        num_cpus::get_physical().max(1)
     } else {
         threads
     };
@@ -237,7 +257,7 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
         avx2,
         rows
     );
-    let mut rt = Runtime::new(&m, rows);
+    let mut rt = Runtime::new(&m, rows, avx2 && !a.fp32_head);
     let mut rng = StdRng::seed_from_u64(a.seed);
 
     let stdout = std::io::stdout();
@@ -254,7 +274,11 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
             eprintln!("\nreached seq_len {}; stopping", c.seq_len);
             break;
         }
-        let next = sample::sample(rt.logits(), a.temperature, a.top_k, &mut rng);
+        let next = {
+            let am = rt.argmax();
+            let (logits, scaled, order) = rt.logits_and_scratch();
+            sample::sample(logits, a.temperature, a.top_k, &mut rng, scaled, order, am)
+        };
         emit_token(&mut out, &tok, next)?;
         rt.forward(&m, next, &pool, avx2);
         decoded += 1;
@@ -321,7 +345,7 @@ fn verify(a: &VerifyArgs) -> Result<i32, String> {
     }
     let pool = build_pool(a.threads)?;
     let avx2 = kernels::have_avx2() && !a.scalar;
-    let mut rt = Runtime::new(&m, v);
+    let mut rt = Runtime::new(&m, v, false);
     for &id in &ids {
         rt.forward(&m, id, &pool, avx2);
     }
@@ -400,12 +424,12 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
     );
     for tc in parse_thread_list(&a.threads)? {
         let pool = build_pool(tc)?;
-        let mut rt = Runtime::new(&m, rows);
+        let mut rt = Runtime::new(&m, rows, avx2 && !a.fp32_head);
         for &id in &ids {
             rt.forward(&m, id, &pool, avx2);
         }
         for _ in 0..4.min(a.tokens) {
-            let next = sample::argmax(rt.logits());
+            let next = rt.argmax();
             rt.forward(&m, next, &pool, avx2);
         }
         rt.reset();
@@ -420,7 +444,7 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
             if rt.pos() >= c.seq_len {
                 break;
             }
-            let next = sample::argmax(rt.logits());
+            let next = rt.argmax();
             rt.forward(&m, next, &pool, avx2);
             decoded += 1;
         }
@@ -437,5 +461,75 @@ fn bench(a: &BenchArgs) -> Result<i32, String> {
             rt.profile.report().replace("profile ms/token: ", "")
         );
     }
+    Ok(0)
+}
+
+fn ppl(a: &PplArgs) -> Result<i32, String> {
+    let mf = ModelFile::open(&a.model)?;
+    let m = mf.model()?;
+    let c = &m.cfg;
+    let raw =
+        std::fs::read(&a.val).map_err(|e| format!("{}: {e}", a.val.display()))?;
+    if raw.len() % 2 != 0 {
+        return Err(format!(
+            "{}: odd byte count {}, expected uint16 tokens",
+            a.val.display(),
+            raw.len()
+        ));
+    }
+    let n_tok = raw.len() / 2;
+    let s = c.seq_len;
+    let v = c.vocab;
+    let pool = build_pool(a.threads)?;
+    let avx2 = kernels::have_avx2() && !a.scalar;
+    let int8 = avx2 && !a.fp32_head;
+    let mut rt = Runtime::new(&m, v, int8);
+    let mut nll = 0.0f64;
+    let mut count = 0u64;
+    for w in 0..a.windows {
+        let base = w * s;
+        if base + s + 1 > n_tok {
+            break;
+        }
+        rt.reset();
+        for pos in 0..s {
+            let tok = u16::from_le_bytes([raw[2 * (base + pos)], raw[2 * (base + pos) + 1]]) as usize;
+            if tok >= v {
+                return Err(format!("val token id {tok} >= vocab {v}"));
+            }
+            rt.forward(&m, tok, &pool, avx2);
+            let target =
+                u16::from_le_bytes([raw[2 * (base + pos + 1)], raw[2 * (base + pos + 1) + 1]])
+                    as usize;
+            let logits = rt.logits();
+            let mut mx = f32::NEG_INFINITY;
+            for &lv in logits {
+                if lv > mx {
+                    mx = lv;
+                }
+            }
+            let mut sum = 0.0f64;
+            for &lv in logits {
+                sum += ((lv - mx) as f64).exp();
+            }
+            nll += sum.ln() - (logits[target] - mx) as f64;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err(format!(
+            "val file {} has too few tokens for one window of seq_len {s}",
+            a.val.display()
+        ));
+    }
+    let mean = nll / count as f64;
+    let mode = if int8 { "int8-head" } else { "fp32-head" };
+    println!(
+        "{:<18}  val CE {:.4}  ppl {:.2}   ({} predictions)",
+        mode,
+        mean,
+        mean.exp(),
+        count
+    );
     Ok(0)
 }

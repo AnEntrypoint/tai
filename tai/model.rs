@@ -204,3 +204,33 @@ impl ModelFile {
         Model::bind(&self.mmap)
     }
 }
+
+pub struct Int8Head {
+    pub w: Vec<u8>,
+    pub scale: Vec<f32>,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+impl Int8Head {
+    pub fn stage(q: &Qt) -> Result<Int8Head, String> {
+        if q.n_groups != 1 {
+            return Err(format!(
+                "int8 head staging needs one group per row, head has {}",
+                q.n_groups
+            ));
+        }
+        let mut w = vec![0u8; q.rows * q.cols];
+        let mut scale = vec![0.0f32; q.rows];
+        for r in 0..q.rows {
+            let row = &q.codes[r * q.row_bytes..r * q.row_bytes + q.row_bytes];
+            let dst = &mut w[r * q.cols..(r + 1) * q.cols];
+            for j in 0..q.cols {
+                let b = row[j >> 1];
+                dst[j] = if j & 1 == 1 { b >> 4 } else { b & 0xF };
+            }
+            scale[r] = crate::kernels::scale_at(q, r, 0);
+        }
+        Ok(Int8Head { w, scale, rows: q.rows, cols: q.cols })
+    }
+}

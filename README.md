@@ -63,25 +63,41 @@ model):
 
 | threads | tok/s | ms/token |
 |---:|---:|---:|
-| 1 | 859 | 1.2 |
-| 2 | 1328 | 0.8 |
-| 4 | 1624 | 0.6 |
-| 8 | 1810 | 0.6 |
-| 16 | 1454 | 0.7 |
+| 1 | 2409 | 0.4 |
+| 2 | 2245 | 0.4 |
+| 4 | 2689 | 0.4 |
+| 8 | 2667 | 0.4 |
+| 16 | 2385 | 0.4 |
 
 Baselines on the same machine and model: the C host runtime (`bench.c`, -O3)
-273 tok/s, tai's own scalar fallback 234 tok/s. The AVX2 kernel alone is 3.7x
-the scalar path; threading the output head peaks at 8 cores (~2.1x more) where
-the 0.3 ms head scan stops covering the fork-join overhead. For reference, the
-same model runs at 9.5 tok/s on an ESP32-S3.
+285 tok/s, tai's scalar fallback 240 tok/s, tai with the fp32 AVX2 head
+(`--fp32-head`) 932 tok/s single-threaded. The default head is int8-on-int8
+(`maddubs`), staged once at load; it is ~4x the fp32 AVX2 head. Numbers are
+from a Ryzen 7 6800H (8C/16T); `--threads 0` uses physical core count, and
+more than 8 threads buys nothing on this part. For reference, the same model
+runs at 9.5 tok/s on an ESP32-S3.
+
+The int8 head is the same activation-quantization trick the ESP32 runtime
+ships: activations are quantized to int8 once per token and each head row is
+an exact integer dot. Its quality cost, measured with
+`firmware/host_verify/ppl.c`'s methodology over 4096 val predictions
+(`tai ppl --model firmware/model/model.bin --val data/val_v32768.bin`):
+
+| runtime | val CE | ppl |
+|---|---:|---:|
+| tai fp32-head | 2.9318 | 18.76 |
+| tai int8-head | 2.9316 | 18.76 |
+| C fp32 (llm.h) | 2.9318 | 18.76 |
+| C int8 (llm.h) | 2.9318 | 18.76 |
 
 ## Verification
 
-`tai verify` forwards the golden prompt and compares every last-position
-logit against the PyTorch reference exported beside the model, the same check
-`firmware/host_verify/verify.c` runs for the C runtime. On the deploy
-artifact all three (PyTorch, C, Rust) agree to fp print precision
-(max abs diff = 0.00000).
+`tai verify` forwards the golden prompt with the exact fp32 head and compares
+every last-position logit against the PyTorch reference exported beside the
+model, the same check `firmware/host_verify/verify.c` runs for the C runtime.
+On the deploy artifact all three (PyTorch, C, Rust) agree to fp print
+precision (max abs diff = 0.00000). `tai ppl` measures val perplexity, and is
+how the int8 generation head is validated (above).
 
 ## Layout
 
@@ -99,9 +115,12 @@ RESULTS.md           the PLE-on-ESP32 research writeup
 
 - mmap: the 14.9MB model is demand-paged straight from disk, never parsed
   into heap structures
-- AVX2+FMA: int4 nibbles unpack to f32 lanes, 32 columns per iteration
-- rayon: the tied output head (32768 x 96, scanned in full every token) is
-  row-split across cores
+- int8 head: the tied output head (32768 x 96, scanned in full every token)
+  is unpacked to bytes once at load, activations are quantized to int8 once
+  per token, and each row is an exact integer dot (`maddubs`/`madd`), row-split
+  across cores with the argmax fused into the same pass
+- AVX2+FMA for every other matvec: int4 nibbles unpack to f32 lanes, 32
+  columns per iteration, with `target-cpu=native` for the scalar stages
 - the dense core is only 559K parameters by design (Per-Layer Embeddings put
   25M parameters in a sparsely-read table), so per-token compute is ~4M MACs
 - one scratch allocation up front, precomputed RoPE tables, contiguous

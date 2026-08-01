@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use std::time::Instant;
 
 use crate::kernels;
-use crate::model::{Model, Qt};
+use crate::model::{Int8Head, Model, Qt};
 
 #[derive(Default)]
 pub struct Profile {
@@ -51,6 +51,11 @@ pub struct Runtime {
     vcache: Vec<f32>,
     rope_c: Vec<f32>,
     rope_s: Vec<f32>,
+    head8: Option<Int8Head>,
+    xq: Vec<i8>,
+    scaled: Vec<f32>,
+    order: Vec<f32>,
+    last_argmax: usize,
     pos: usize,
     head_rows: usize,
     pub profiling: bool,
@@ -58,7 +63,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(m: &Model, head_rows: usize) -> Runtime {
+    pub fn new(m: &Model, head_rows: usize, int8_head: bool) -> Runtime {
         let c = &m.cfg;
         let dh = c.dim / c.n_heads;
         let half = dh / 2;
@@ -71,6 +76,11 @@ impl Runtime {
                 rope_s[pos * half + i] = (pos as f32 * freq).sin();
             }
         }
+        let head8 = if int8_head {
+            Int8Head::stage(&m.tok_emb).ok()
+        } else {
+            None
+        };
         Runtime {
             x: vec![0.0; c.dim],
             h: vec![0.0; c.ffn.max(c.dim)],
@@ -87,6 +97,11 @@ impl Runtime {
             vcache: vec![0.0; c.n_layers * c.seq_len * c.dim],
             rope_c,
             rope_s,
+            head8,
+            xq: vec![0; c.dim],
+            scaled: Vec::with_capacity(head_rows),
+            order: Vec::with_capacity(head_rows),
+            last_argmax: 0,
             pos: 0,
             head_rows,
             profiling: false,
@@ -106,6 +121,18 @@ impl Runtime {
         &self.logits
     }
 
+    pub fn argmax(&self) -> usize {
+        self.last_argmax
+    }
+
+    pub fn int8_head(&self) -> bool {
+        self.head8.is_some()
+    }
+
+    pub fn logits_and_scratch(&mut self) -> (&[f32], &mut Vec<f32>, &mut Vec<f32>) {
+        (&self.logits, &mut self.scaled, &mut self.order)
+    }
+
     pub fn forward(&mut self, m: &Model, token: usize, pool: &rayon::ThreadPool, avx2: bool) {
         let c = &m.cfg;
         let (d, l, p, f) = (c.dim, c.n_layers, c.ple_dim, c.ffn);
@@ -117,7 +144,8 @@ impl Runtime {
 
         let Self {
             x, h, qkv, att, g1, g2, ple, tmp_p, trow, logits, scores, kcache, vcache,
-            rope_c, rope_s, pos: rpos, head_rows, profiling: _, profile,
+            rope_c, rope_s, head8, xq, last_argmax, pos: rpos, head_rows,
+            profiling: _, profile, ..
         } = self;
 
         kernels::deq_row(&m.tok_emb, token, x);
@@ -237,7 +265,17 @@ impl Runtime {
         }
 
         kernels::rmsnorm_ip(x, m.out_norm);
-        matvec_head(&m.tok_emb, x, logits, *head_rows, pool, avx2);
+        match head8 {
+            Some(h8) => {
+                let xs = kernels::quantize_act(x, xq);
+                let asum = kernels::act_sum(xq);
+                *last_argmax =
+                    matvec_head_int8(h8, xq, asum, xs, logits, *head_rows, pool, avx2);
+            }
+            None => {
+                *last_argmax = matvec_head(&m.tok_emb, x, logits, *head_rows, pool, avx2);
+            }
+        }
         if profiling {
             profile.head_ns += t0.elapsed().as_nanos();
             profile.calls += 1;
@@ -252,6 +290,61 @@ fn matvec(q: &Qt, x: &[f32], y: &mut [f32], avx2: bool) {
     }
 }
 
+#[inline]
+fn head8_row(h: &Int8Head, xq: &[i8], asum: i32, xs: f32, r: usize, avx2: bool) -> f32 {
+    let w = &h.w[r * h.cols..(r + 1) * h.cols];
+    let d = kernels::dot_u8_i8(w, xq, avx2);
+    (d - 8 * asum) as f32 * h.scale[r] * xs
+}
+
+fn matvec_head_int8(
+    h: &Int8Head,
+    xq: &[i8],
+    asum: i32,
+    xs: f32,
+    y: &mut [f32],
+    rows: usize,
+    pool: &rayon::ThreadPool,
+    avx2: bool,
+) -> usize {
+    let threads = pool.current_num_threads();
+    if threads < 2 || rows * h.cols < (1 << 18) {
+        let mut bv = f32::NEG_INFINITY;
+        let mut bi = 0;
+        for r in 0..rows {
+            let v = head8_row(h, xq, asum, xs, r, avx2);
+            y[r] = v;
+            if v > bv {
+                bv = v;
+                bi = r;
+            }
+        }
+        return bi;
+    }
+    let chunk = rows.div_ceil(threads * 4).max(1);
+    pool.install(|| {
+        y[..rows]
+            .par_chunks_mut(chunk)
+            .enumerate()
+            .map(|(ci, ch)| {
+                let mut bv = f32::NEG_INFINITY;
+                let mut bi = 0;
+                for (k, slot) in ch.iter_mut().enumerate() {
+                    let r = ci * chunk + k;
+                    let v = head8_row(h, xq, asum, xs, r, avx2);
+                    *slot = v;
+                    if v > bv {
+                        bv = v;
+                        bi = r;
+                    }
+                }
+                (bv, bi)
+            })
+            .reduce(|| (f32::NEG_INFINITY, 0), |a, b| if b.0 > a.0 { b } else { a })
+            .1
+    })
+}
+
 fn matvec_head(
     q: &Qt,
     x: &[f32],
@@ -259,23 +352,41 @@ fn matvec_head(
     rows: usize,
     pool: &rayon::ThreadPool,
     avx2: bool,
-) {
+) -> usize {
     let threads = pool.current_num_threads();
     if threads < 2 || rows * q.cols < (1 << 18) {
+        let mut bv = f32::NEG_INFINITY;
+        let mut bi = 0;
         for r in 0..rows {
-            y[r] = kernels::matvec_row(q, x, r, avx2);
+            let v = kernels::matvec_row(q, x, r, avx2);
+            y[r] = v;
+            if v > bv {
+                bv = v;
+                bi = r;
+            }
         }
-        return;
+        return bi;
     }
     let chunk = rows.div_ceil(threads * 4).max(1);
     pool.install(|| {
         y[..rows]
             .par_chunks_mut(chunk)
             .enumerate()
-            .for_each(|(ci, ch)| {
+            .map(|(ci, ch)| {
+                let mut bv = f32::NEG_INFINITY;
+                let mut bi = 0;
                 for (k, slot) in ch.iter_mut().enumerate() {
-                    *slot = kernels::matvec_row(q, x, ci * chunk + k, avx2);
+                    let r = ci * chunk + k;
+                    let v = kernels::matvec_row(q, x, r, avx2);
+                    *slot = v;
+                    if v > bv {
+                        bv = v;
+                        bi = r;
+                    }
                 }
-            });
-    });
+                (bv, bi)
+            })
+            .reduce(|| (f32::NEG_INFINITY, 0), |a, b| if b.0 > a.0 { b } else { a })
+            .1
+    })
 }

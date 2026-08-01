@@ -29,7 +29,7 @@ pub fn half_to_f32(h: u16) -> f32 {
 }
 
 #[inline]
-fn scale_at(q: &Qt, r: usize, gi: usize) -> f32 {
+pub fn scale_at(q: &Qt, r: usize, gi: usize) -> f32 {
     let i = (r * q.n_groups + gi) * 2;
     half_to_f32(u16::from_le_bytes([q.scales[i], q.scales[i + 1]]))
 }
@@ -184,5 +184,70 @@ pub fn rmsnorm_ip(x: &mut [f32], w: &[u8]) {
     let inv = 1.0 / (ss / n as f32 + RMS_EPS).sqrt();
     for i in 0..n {
         x[i] *= f32_at(w, i) * inv;
+    }
+}
+
+pub fn quantize_act(x: &[f32], xq: &mut [i8]) -> f32 {
+    let mut xmax = 1e-8f32;
+    for &v in x {
+        let a = v.abs();
+        if a > xmax {
+            xmax = a;
+        }
+    }
+    let inv = 127.0 / xmax;
+    for (o, &v) in xq.iter_mut().zip(x.iter()) {
+        let q = libm::rintf(v * inv) as i32;
+        *o = q.clamp(-127, 127) as i8;
+    }
+    xmax / 127.0
+}
+
+pub fn act_sum(xq: &[i8]) -> i32 {
+    let mut s = 0i32;
+    for &v in xq {
+        s += v as i32;
+    }
+    s
+}
+
+pub fn dot_u8_i8(w: &[u8], a: &[i8], avx2: bool) -> i32 {
+    #[cfg(target_arch = "x86_64")]
+    if avx2 {
+        return unsafe { avx2_int8::dot_u8_i8_avx2(w, a) };
+    }
+    let mut total = 0i32;
+    for i in 0..w.len() {
+        total += w[i] as i32 * a[i] as i32;
+    }
+    total
+}
+
+#[cfg(target_arch = "x86_64")]
+mod avx2_int8 {
+    use core::arch::x86_64::*;
+
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn dot_u8_i8_avx2(w: &[u8], a: &[i8]) -> i32 {
+        let mut acc = _mm256_setzero_si256();
+        let n = w.len() & !31;
+        let mut i = 0;
+        while i < n {
+            let wv = _mm256_loadu_si256(w.as_ptr().add(i) as *const __m256i);
+            let av = _mm256_loadu_si256(a.as_ptr().add(i) as *const __m256i);
+            let p = _mm256_maddubs_epi16(wv, av);
+            let q = _mm256_madd_epi16(p, _mm256_set1_epi16(1));
+            acc = _mm256_add_epi32(acc, q);
+            i += 32;
+        }
+        let s = _mm_add_epi32(_mm256_castsi256_si128(acc), _mm256_extracti128_si256::<1>(acc));
+        let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0x4E>(s));
+        let s = _mm_add_epi32(s, _mm_shuffle_epi32::<1>(s));
+        let mut total = _mm_cvtsi128_si32(s);
+        while i < w.len() {
+            total += *w.get_unchecked(i) as i32 * *a.get_unchecked(i) as i32;
+            i += 1;
+        }
+        total
     }
 }

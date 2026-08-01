@@ -1,27 +1,28 @@
 use rand::rngs::StdRng;
 use rand::Rng;
 
-pub fn argmax(logits: &[f32]) -> usize {
-    let mut best = 0;
-    let mut bv = f32::NEG_INFINITY;
-    for (i, &v) in logits.iter().enumerate() {
-        if v > bv {
-            bv = v;
-            best = i;
-        }
-    }
-    best
-}
-
-pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut StdRng) -> usize {
+pub fn sample(
+    logits: &[f32],
+    temperature: f32,
+    top_k: usize,
+    rng: &mut StdRng,
+    scaled: &mut Vec<f32>,
+    order: &mut Vec<f32>,
+    argmax: usize,
+) -> usize {
     if temperature <= 0.0 || top_k == 1 {
-        return argmax(logits);
+        return argmax;
     }
     let n = logits.len();
-    let mut scaled: Vec<f32> = logits.iter().map(|&v| v / temperature).collect();
+    scaled.clear();
+    scaled.extend_from_slice(logits);
+    for v in scaled.iter_mut() {
+        *v /= temperature;
+    }
     let k = top_k.min(n);
     let threshold = if k > 0 && k < n {
-        let mut order = scaled.clone();
+        order.clear();
+        order.extend_from_slice(scaled);
         let (_, &mut t, _) = order
             .select_nth_unstable_by(k - 1, |a, b| {
                 b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
@@ -42,7 +43,7 @@ pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut StdRng) 
         total += *v;
     }
     if total <= 0.0 || !total.is_finite() {
-        return argmax(logits);
+        return argmax;
     }
     let mut r = rng.random::<f32>() * total;
     for (i, &v) in scaled.iter().enumerate() {
@@ -51,5 +52,5 @@ pub fn sample(logits: &[f32], temperature: f32, top_k: usize, rng: &mut StdRng) 
             return i;
         }
     }
-    argmax(logits)
+    argmax
 }
