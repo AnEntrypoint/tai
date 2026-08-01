@@ -38,6 +38,8 @@ target/
 .gm/last-prompt.txt
 .gm/long-gap-retry-state
 .gm/turn-state.json
+.gm/next-step.md
+.gm/.gm-continue-count
 .gm/claim-audit-fired
 .gm/residual-check-fired
 .agentplug/
