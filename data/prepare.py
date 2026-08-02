@@ -22,6 +22,17 @@ SLICE_BYTES = 300 * 1024 * 1024
 VAL_FRACTION = 0.005
 
 
+
+
+def _bulk_encoder(tok):
+    try:
+        import gigatoken as gt
+        g = gt.Tokenizer(tok)
+        return lambda texts: [list(r) for r in g.encode_batch(texts)]
+    except Exception:
+        return lambda texts: [e.ids for e in tok.encode_batch(texts)]
+
+
 def download():
     if os.path.exists(RAW) and os.path.getsize(RAW) >= SLICE_BYTES * 0.99:
         print(f"already have {RAW}")
@@ -83,12 +94,13 @@ def main():
     print(f"eot id = {eot}")
 
     print("encoding...")
+    encode = _bulk_encoder(tok)
     docs = text.split("<|endoftext|>")
     ids = []
     for i in range(0, len(docs), 20000):
         batch = [d for d in docs[i : i + 20000] if d.strip()]
-        for enc in tok.encode_batch(batch):
-            ids.extend(enc.ids)
+        for enc_ids in encode(batch):
+            ids.extend(enc_ids)
             ids.append(eot)
         print(f"  {i + len(batch)}/{len(docs)} docs, {len(ids) / 1e6:.1f}M tokens", flush=True)
 

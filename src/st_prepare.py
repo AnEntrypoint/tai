@@ -65,8 +65,19 @@ def read_jsonl(path):
                 yield json.loads(line)
 
 
+
+
+def _bulk_encoder(tok):
+    try:
+        import gigatoken as gt
+        g = gt.Tokenizer(tok)
+        return lambda texts: [list(r) for r in g.encode_batch(texts)]
+    except Exception:
+        return lambda texts: [e.ids for e in tok.encode_batch(texts)]
+
 def main():
     tok = Tokenizer.from_file(TOK)
+    encode = _bulk_encoder(tok)
     eot = tok.token_to_id("<|endoftext|>")
     texts = []
 
@@ -87,8 +98,8 @@ def main():
     print(f"real {n_real} | authored {n_auth} | template {TEMPLATE_CAP} | total {len(texts)}")
 
     ids = []
-    for i, t in enumerate(texts):
-        ids.extend(tok.encode(t).ids)
+    for i, enc in enumerate(encode(texts)):
+        ids.extend(enc)
         ids.append(eot)
         if (i + 1) % 10000 == 0:
             print(f"  {i + 1}/{len(texts)}, {len(ids) / 1e6:.1f}M tokens", flush=True)

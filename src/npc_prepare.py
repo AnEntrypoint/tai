@@ -83,15 +83,26 @@ def conversations():
         yield render(system, turns)
 
 
+
+
+def _bulk_encoder(tok):
+    try:
+        import gigatoken as gt
+        g = gt.Tokenizer(tok)
+        return lambda texts: [list(r) for r in g.encode_batch(texts)]
+    except Exception:
+        return lambda texts: [e.ids for e in tok.encode_batch(texts)]
+
 def main():
     tok = Tokenizer.from_file(TOK)
+    encode = _bulk_encoder(tok)
     eot = tok.token_to_id("<|endoftext|>")
     convos = [c for c in conversations() if 0 < len(c) <= MAX_CHARS]
     print(f"{len(convos)} conversations")
 
     ids = []
-    for i, c in enumerate(convos):
-        ids.extend(tok.encode(c).ids)
+    for i, enc in enumerate(encode(convos)):
+        ids.extend(enc)
         ids.append(eot)
         if (i + 1) % 1000 == 0:
             print(f"  {i + 1}/{len(convos)} convos, {len(ids) / 1e6:.1f}M tokens", flush=True)
