@@ -75,6 +75,10 @@ def main():
     ap.add_argument("--fixed-ffn", type=int, default=None,
                     help="pin ffn_hidden and skip the core solver (table-scaling sweep)")
     ap.add_argument("--vocab", type=int, default=4096)
+    ap.add_argument("--data-suffix", default=None,
+                    help="override the train/val bin suffix (e.g. _npc for train_npc.bin)")
+    ap.add_argument("--init-from", default=None,
+                    help="path to a runs/*.pt checkpoint to fine-tune from")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
@@ -84,11 +88,17 @@ def main():
     os.makedirs(RUNS, exist_ok=True)
 
     # vocab 4096 uses the original train.bin/val.bin; other vocabs use suffixed bins.
-    suffix = "" if args.vocab == 4096 else f"_v{args.vocab}"
+    suffix = args.data_suffix if args.data_suffix is not None else (
+        "" if args.vocab == 4096 else f"_v{args.vocab}"
+    )
 
     base = Config(seq_len=args.seq_len, ple_dim=args.ple_dim, vocab_size=args.vocab,
                   d_model=args.d_model, n_layers=args.n_layers, n_heads=args.n_heads)
     model = make_model(args.arm, args.target_core, base, fixed_ffn=args.fixed_ffn).to(device)
+    if args.init_from:
+        ck = torch.load(args.init_from, map_location=device, weights_only=False)
+        model.load_state_dict(ck["state"])
+        print(f"initialized from {args.init_from}")
     budget = model.param_budget()
     cfg = model.cfg
 
@@ -130,6 +140,8 @@ def main():
                 f"| val {vl:.4f} | ppl {math.exp(vl):7.2f} | {time.time() - t0:5.0f}s",
                 flush=True,
             )
+            torch.save({"cfg": cfg.__dict__, "state": model.state_dict()},
+                       os.path.join(RUNS, f"{name}-latest.pt"))
 
     result = {
         "arm": args.arm,

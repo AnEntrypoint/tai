@@ -7,6 +7,7 @@ __pycache__/
 data/*.bin
 data/*.txt
 data/*.json
+data/npc/
 
 # training outputs
 runs/

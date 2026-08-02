@@ -36,6 +36,8 @@ struct GenArgs {
     prompt_ids: Option<String>,
     #[arg(long)]
     tokenizer: Option<PathBuf>,
+    #[arg(long)]
+    stop_string: Vec<String>,
     #[arg(long, default_value_t = 200)]
     tokens: usize,
     #[arg(long, default_value_t = 0.8)]
@@ -261,6 +263,13 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
         avx2,
         rows
     );
+    if !a.stop_string.is_empty() && tok.is_none() {
+        return Err("--stop-string needs --tokenizer (text mode)".to_string());
+    }
+    let eot_id = tok
+        .as_ref()
+        .and_then(|t| t.token_to_id("<|endoftext|>"))
+        .map(|v| v as usize);
     let mut rt = Runtime::new(&m, rows, avx2 && !a.fp32_head);
     rt.i4_head = a.i4_head;
     let mut rng = StdRng::seed_from_u64(a.seed);
@@ -273,6 +282,7 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
     }
 
     let mut decoded = 0usize;
+    let mut emitted = String::new();
     let t_start = Instant::now();
     for _ in 0..a.tokens {
         if rt.pos() >= c.seq_len {
@@ -284,9 +294,36 @@ fn generate(a: &GenArgs) -> Result<i32, String> {
             let (logits, scaled, order) = rt.logits_and_scratch();
             sample::sample(logits, a.temperature, a.top_k, &mut rng, scaled, order, am)
         };
-        emit_token(&mut out, &tok, next)?;
+        if eot_id == Some(next) {
+            break;
+        }
+        if a.stop_string.is_empty() {
+            emit_token(&mut out, &tok, next)?;
+        } else {
+            let piece = tok
+                .as_ref()
+                .map(|t| t.decode(&[next as u32], true))
+                .transpose()
+                .map_err(|e| format!("decode token {next}: {e}"))?
+                .unwrap_or_default();
+            emitted.push_str(&piece);
+            let cut = a
+                .stop_string
+                .iter()
+                .filter_map(|m| emitted.find(m.as_str()))
+                .min();
+            if let Some(idx) = cut {
+                emitted.truncate(idx);
+                break;
+            }
+        }
         rt.forward(&m, next, &pool, avx2);
         decoded += 1;
+    }
+    if !a.stop_string.is_empty() {
+        out.write_all(emitted.as_bytes())
+            .and_then(|()| out.flush())
+            .map_err(|e| format!("stdout: {e}"))?;
     }
     let elapsed = t_start.elapsed().as_secs_f64();
     writeln!(out).map_err(|e| format!("stdout: {e}"))?;

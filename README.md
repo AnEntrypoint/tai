@@ -37,6 +37,59 @@ kernels), `--vocab-cap N` (score only the first N head rows), `--seed`.
 Sampling follows `src/model.py`: temperature scaling, top-k masking (default
 40), softmax, multinomial. `--temperature 0` is greedy.
 
+## NPC dialog model
+
+Beyond the TinyStories base, this repo now trains and ships an NPC dialog
+model. Three fine-tune rounds over ~90M tokens of public NPC dialog data
+(chimbiwide/NPC-Dialogue_v2, chimbiwide/NPC-Quest-Dialogue, both apache-2.0,
+plus dprashar/npc_dialogue_rpg_quests and amaydle/npc-dialogue), starting
+from the TinyStories checkpoint, on an RTX 3060:
+
+| round | val ppl |
+|---|---:|
+| init (TinyStories only) | 1458 |
+| r1 (2000 steps, lr 5e-4) | 5.08 |
+| r2 (+2000 steps, lr 3e-4) | 3.46 |
+| r3 (+1500 steps, lr 2e-4) | 3.06 |
+
+Data pipeline: `src/npc_prepare.py` renders each conversation as
+`### System:` persona/location, then `### Player:` / `### NPC:` turns with an
+eot after each conversation, encoded with the same bpe32768 tokenizer into
+uint16 bins. `src/train.py --data-suffix _npc --init-from <ckpt>` runs the
+fine-tune; `src/npc_eval.py` samples fixed personas for round comparison.
+
+In the runtime, stop strings bound each turn (`--stop-string` is repeatable;
+generation also always halts at the eot id):
+
+```bash
+./target/release/tai generate   --model firmware/model/model.bin   --tokenizer data/bpe32768.json   --prompt "### System:
+Enter roleplay mode. You are Dorn. Background: Dorn is a grumpy dwarven blacksmith in the mountain town of Karhold. He respects hard work and has no patience for idle chatter, but softens when someone shows genuine interest in the craft of steel. Current Location: Dorn's forge in the lower caverns of Karhold. Roleplaying Instructions: - Speak in character - Keep responses conversational.
+### Player:
+Hello there. What do you have for sale?
+### NPC:
+"   --tokens 60 --temperature 0.6 --top-k 40   --stop-string "### Player:" --stop-string "### System:"
+```
+
+A witnessed response from the r3 model:
+
+> *He clutches the knife, his scarred hand trembling slightly.* Ah, a
+> warrior. Good. I've been rumors of rumors in the Vanguard's Bounty, but
+> I've seen ale firsthand.
+
+The honest ceiling: a 28.9M-parameter model with a 559K-param dense core
+learns NPC dialog *form* -- first-person voice, action beats, turn structure,
+clean stops -- but persona adherence and factual grounding stay loose. It is
+a flavor-chatter engine for game NPCs, not a deep roleplayer; richer personas
+in the training format (long Background / Current Location / Instructions
+blocks) get the most out of it.
+
+GPU notes: training ran on an RTX 3060 Laptop (torch cu128, ~6.4k tok/s vs
+1.6k tok/s CPU). For inference, a CUDA-graph decode engine
+(`src/cuda_graph_infer.py`, fp32-logit-exact) measures 1316 tok/s vs the CPU
+runtime's 4289-5766 -- at 28.9M params single-stream decode is
+kernel-serialization-bound on GPU and bandwidth-trivial on CPU, so the CPU
+wins decode while the GPU wins prefill (29,798 tok/s) and training.
+
 ## Model format
 
 tai reads the same `PLE1` model.bin the ESP32 firmware uses: a flat,
