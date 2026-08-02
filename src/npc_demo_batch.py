@@ -104,14 +104,20 @@ def main():
     torch.cuda.synchronize()
     dt = time.perf_counter() - t0
 
-    for i, (name, _, _, q) in enumerate(PERSONAS):
+    for i, (name, bio, loc, q) in enumerate(PERSONAS):
         text = tok.decode(generated[i])
         stops = [c for c in (text.find("### Player:"), text.find("### System:")) if c >= 0]
         if stops:
             text = text[: min(stops)]
-        print(f"--- {name} ---")
-        print(f"Player: {q}")
-        print(f"NPC:{text}\n")
+        print("=" * 66)
+        print(f"CONVERSATION {i + 1}: {name}")
+        print("=" * 66)
+        print(f"INPUT  [system]: You are {name.split(',')[0]}. Background: {bio}")
+        print(f"                 Current Location: {loc}")
+        print(f"                 Instructions: speak in character, stay conversational.")
+        print(f"INPUT  [player]: {q}")
+        print(f"OUTPUT [npc]:{text}")
+        print()
     print(f"[{b} streams x {n_tokens} tokens = {b * n_tokens} tokens in {dt:.2f}s "
           f"= {b * n_tokens / dt:.0f} tok/s aggregate on one 3060]")
 
