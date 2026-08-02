@@ -62,7 +62,7 @@ SEED = int(os.environ.get("DEMO_SEED", "1"))
 def main():
     tok = Tokenizer.from_file("../data/bpe32768.json")
     b = len(PERSONAS)
-    eng = BatchEngine("../runs/ple-npc-gpu3-s2.pt", b)
+    eng = BatchEngine("../runs/ple-npc-grpo3.pt", b)
     eng.capture()
 
     prompts = []

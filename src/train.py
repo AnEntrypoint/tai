@@ -46,11 +46,14 @@ def evaluate(model, batcher, iters):
     return sum(losses) / len(losses)
 
 
-def lr_at(step, total, peak, warmup):
+def lr_at(step, total, peak, warmup, stable_frac=0.6):
     if step < warmup:
         return peak * (step + 1) / warmup
-    p = (step - warmup) / max(1, total - warmup)
-    return 0.1 * peak + 0.9 * peak * 0.5 * (1 + math.cos(math.pi * p))
+    stable_end = warmup + int((total - warmup) * stable_frac)
+    if step < stable_end:
+        return peak
+    p = (step - stable_end) / max(1, total - stable_end)
+    return peak * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * p)))
 
 
 def main():
@@ -66,6 +69,8 @@ def main():
     ap.add_argument("--seq-len", type=int, default=512)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--warmup", type=int, default=200)
+    ap.add_argument("--stable-frac", type=float, default=0.6,
+                    help="WSD: fraction of post-warmup steps held at peak lr before decay")
     ap.add_argument("--eval-every", type=int, default=250)
     ap.add_argument("--eval-iters", type=int, default=40)
     ap.add_argument("--ple-dim", type=int, default=64)
@@ -120,7 +125,7 @@ def main():
     t0 = time.time()
 
     for step in range(args.steps):
-        lr = lr_at(step, args.steps, args.lr, args.warmup)
+        lr = lr_at(step, args.steps, args.lr, args.warmup, args.stable_frac)
         for g in opt.param_groups:
             g["lr"] = lr
         x, y = train_b()

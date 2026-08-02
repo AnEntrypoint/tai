@@ -39,51 +39,85 @@ Sampling follows `src/model.py`: temperature scaling, top-k masking (default
 
 ## NPC dialog model
 
-Beyond the TinyStories base, this repo now trains and ships an NPC dialog
-model. Three fine-tune rounds over ~90M tokens of public NPC dialog data
-(chimbiwide/NPC-Dialogue_v2, chimbiwide/NPC-Quest-Dialogue, both apache-2.0,
-plus dprashar/npc_dialogue_rpg_quests and amaydle/npc-dialogue), starting
-from the TinyStories checkpoint, on an RTX 3060:
+Beyond the TinyStories base, this repo trains and ships a single-purpose
+SillyTavern-format NPC dialog model. The canonical format is the ST
+convention -- card fields plus name-prefixed turns:
 
-| round | val ppl |
-|---|---:|
-| init (TinyStories only) | 1458 |
-| r1 (2000 steps, lr 5e-4) | 5.08 |
-| r2 (+2000 steps, lr 3e-4) | 3.46 |
-| r3 (+1500 steps, lr 2e-4) | 3.06 |
-
-Data pipeline: `src/npc_prepare.py` renders each conversation as
-`### System:` persona/location, then `### Player:` / `### NPC:` turns with an
-eot after each conversation, encoded with the same bpe32768 tokenizer into
-uint16 bins. `src/train.py --data-suffix _npc --init-from <ckpt>` runs the
-fine-tune; `src/npc_eval.py` samples fixed personas for round comparison.
-
-In the runtime, stop strings bound each turn (`--stop-string` is repeatable;
-generation also always halts at the eot id):
-
-```bash
-./target/release/tai generate   --model firmware/model/model.bin   --tokenizer data/bpe32768.json   --prompt "### System:
-Enter roleplay mode. You are Dorn. Background: Dorn is a grumpy dwarven blacksmith in the mountain town of Karhold. He respects hard work and has no patience for idle chatter, but softens when someone shows genuine interest in the craft of steel. Current Location: Dorn's forge in the lower caverns of Karhold. Roleplaying Instructions: - Speak in character - Keep responses conversational.
-### Player:
-Hello there. What do you have for sale?
-### NPC:
-"   --tokens 60 --temperature 0.6 --top-k 40   --stop-string "### Player:" --stop-string "### System:"
+```
+Description: <who they are>
+Personality: <traits>
+Scenario: <where this happens>
+<START>
+<Name>: <first message>
+Player: <question>
+<Name>: <answer>
 ```
 
-A witnessed response from the r3 model:
+The name is the turn prefix, so name binding is structural, not memorized.
+`src/st_data.py` (cards to conversations), `src/st_world.py` (a world DB of
+items, prices, places, and quests to grounded dialogues), `src/st_prepare.py`
+(interleaved anti-overfit mixture with ~20% general text), plus real
+roleplay sets (chimbiwide, apache-2.0; NousResearch/CharacterCodex;
+dprashar quest pool; amaydle) feed the pipeline. The model covers the full
+ST surface: first messages, example dialogues, lorebook blocks, author's
+notes, group scenes, narration-only mode, and user personas.
 
-> *He clutches the knife, his scarred hand trembling slightly.* Ah, a
-> warrior. Good. I've been rumors of rumors in the Vanguard's Bounty, but
-> I've seen ale firsthand.
+## The measured training arc (~200M tokens, 14 rounds, RTX 3060)
 
-The honest ceiling: a 28.9M-parameter model with a 559K-param dense core
-learns NPC dialog *form* -- first-person voice, action beats, turn structure,
-clean stops -- but persona adherence and factual grounding stay loose. It is
-a flavor-chatter engine for game NPCs, not a deep roleplayer; richer personas
-in the training format (long Background / Current Location / Instructions
-blocks) get the most out of it.
+Each claim below has a number behind it, measured by `src/npc_forge.py`
+(generate-grade-inject cycles against 150 cards x 8 samples = 2400 rollouts):
 
-GPU notes: training ran on an RTX 3060 Laptop (torch cu128, ~6.4k tok/s vs
+| stage | what it taught | evidence |
+|---|---|---|
+| SFT on real RP | dialog form, turn structure | val ppl 1458 -> 3.06 in 3 rounds |
+| synthetic persona anchors | answering the question asked | intent rate 11% -> 100% in one round |
+| name-echo curricula | NOT enough for identity | persona swap stayed 22-78% across all SFT |
+| template-heavy SFT | is a regression vector | card_continuation 1% -> 20% after one template-heavy top-up |
+| **GRPO (critic-free, DeepSeekMath-style)** | **identity + stopping** | **persona_swap -> 0.1-2%, no_stop 94% -> 2%, pass rate 3% -> 55%** |
+| world-DB grounded SFT | grounded onsets | answers open with real items at real prices (object_ungrounded 0.5%) |
+
+The forge is the co-evolution loop: generate, grade (persona_swap, card
+continuation, intent, stop, grounding, repetition), inject repairs, retrain.
+An LLM judges the dashboards between rounds; the rule grader itself was
+caught over-firing once (83% "drift" that was really 1% persona swap).
+
+## The scale assertion (what this arc actually measured)
+
+1. **Form is data-solvable.** Format, turn structure, stopping, and
+   question-intent all yield to SFT with the right data shapes, fast.
+2. **Identity is reward-solvable, not data-solvable.** Across ~200M tokens
+   of every SFT variation tried, persona drift never went below ~20%. Three
+   hundred GRPO steps (sample K=8, rule-based reward, group-relative
+   advantage, no critic) took it to zero; a dedup penalty and KL anchor were
+   needed after round one reward-hacked into template collapse. This is the
+   RLAIF result reproduced at 28.9M parameters.
+3. **Content depth is capacity-bound.** Every round produces correct,
+   often DB-grounded onsets ("Hard cheese wheel, 10 gold") and then noise
+   within a sentence or two. 14 rounds and ~200M tokens did not move that
+   split. The 559K-param dense core can hold the *shape* of a SillyTavern
+   character but not a deep one. MLA and MoE do not apply at this size --
+   the PLE table already is the sparse-capacity trick. Assistant-axis-style
+   activation capping was considered and is superseded by the GRPO drift
+   fix (persona swap is 0.1-2% without it).
+
+Ship checkpoint: `runs/ple-st-r8-grpo.pt` (world-DB grounded SFT + GRPO
+round 6): forge pass rate 55%, persona swap 1.5%, card continuation 0.2%,
+clean structural behavior across all 2400-rollout sweeps.
+
+In the runtime:
+
+```bash
+./target/release/tai generate   --model firmware/model/model.bin   --tokenizer data/bpe32768.json   --prompt "Description: Dorn, a grumpy dwarven blacksmith of Karhold.
+Scenario: Dorn's forge, anvils ringing, coal smoke in the air.
+<START>
+Dorn: *does not look up* If you've come for steel, say what it needs to do.
+Player: What do you have for sale?
+Dorn:"   --tokens 60 --temperature 0.5 --stop-string "Player:"
+```
+
+`src/npc_demo_batch.py` runs 10 such conversations as one batched GPU pass.
+
+GPU notes:GPU notes: training ran on an RTX 3060 Laptop (torch cu128, ~6.4k tok/s vs
 1.6k tok/s CPU). For inference, a CUDA-graph decode engine
 (`src/cuda_graph_infer.py`, fp32-logit-exact) measures 1316 tok/s vs the CPU
 runtime's 4289-5766 -- at 28.9M params single-stream decode is

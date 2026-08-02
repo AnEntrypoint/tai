@@ -63,6 +63,12 @@ def conversations():
             if system and turns:
                 yield render(system, turns)
 
+    for synth in ("synthetic.jsonl", "synthetic_names.jsonl"):
+        path = os.path.join(NPC, synth)
+        if os.path.exists(path):
+            for row in read_jsonl(path):
+                yield row["text"]
+
     rows = json.load(open(os.path.join(NPC, "dprashar-output.json"), encoding="utf-8"))
     for row in rows:
         system = (f"You are a quest-giving NPC in a fantasy world. "
