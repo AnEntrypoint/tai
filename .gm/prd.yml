@@ -1,1 +1,47 @@
-[]
+- id: diag-forge-baseline
+  subject: re-run forge on runs/ple-st-r8-grpo.pt this turn; witness current flaw histogram and raw failing samples
+  status: completed
+  witness: 'forge run bash-rihwlmru on ple-st-r8-grpo.pt: 720 rollouts, identity_missed 14%%, intent_missed 10%%, object_ungrounded 9%%, persona_swap 1%%; pass-rate print reads append-mode failures file (garbage negative number) -- filed as fix-forge-passrate'
+- id: diag-decode-grid
+  subject: measure coherence/depth across decoding grid (greedy, t=0.3/0.5/0.7, top-k) on fixed ST probes to separate decoding levers from training levers
+  status: completed
+  witness: 'diag_probes.py run: non-word rate 0.5%% at t<=0.7 (3.8%% at t0.9); identical template onset across ALL temperatures and cards -- decoding is not the depth lever'
+- id: diag-teacher-forced
+  subject: teacher-forced ppl of ship model on gold coherent multi-sentence responses vs its own degenerate tails -- does the model rank coherent text higher
+  status: completed
+  witness: 'model mean lp: own samples -0.25..-0.75 vs gold -2.2..-3.6 (probe used mismatched question, redesign folded into verify-forge-rerun); probe exposed contaminated gold responses (They say You..., The user is seeking...)'
+- id: diag-data-audit
+  subject: 'audit st_conversations.jsonl + mixture: response length distribution, total unique tokens, epochs seen at 200M tokens; quantify overfit from train/val gap in round logs'
+  status: completed
+  witness: st_conversations 38850 rows / 16.25M tokens / 12.3 epochs at 200M; resp p50=45 tok; 6410 deal_in_place + 2917 they-say-you contaminated slots; bins hold 6000 template rows vs ~16 template skeletons = ~1500 reps each
+- id: lever-depth-metric
+  subject: 'RESCOPED: non-word rate measured low (0.5%%); the real gap is specificity -- add template_echo flaw (known high-freq skeletons) + cross-prompt response dedup to forge grader and GRPO reward'
+  status: pending
+- id: lever-long-gen
+  subject: extend forge and GRPO generation windows from 48 to 96-128 tokens so depth is actually exercised and graded
+  status: pending
+- id: lever-adaptive-grpo
+  subject: 'adaptive-difficulty prompt selection in npc_grpo: track per-prompt pass rate, sample prompts in the 20-80% learning zone (RL-scaling curriculum)'
+  status: pending
+- id: lever-synth-depth
+  subject: 'RESCOPED: rewrite st_data.py/npc_synth.py generators -- combinatorial template banks (10+ per intent), no raw 2nd-person scenario splicing, world-DB grounded fragments; regenerate st_conversations.jsonl; add decontam filter in st_prepare.py; rebuild bins'
+  status: completed
+  witness: 'st_data.py rewritten combinatorially (ITEMS-grounded, no raw scen splice); regenerated 38774 rows: 0 toxic-template, 0 meta-narrative in response slots (166 header hits are legit card text); st_prepare.py now includes st_world.jsonl (900) + TOXIC decontam filter; bins rebuilt 10.5M train tokens'
+- id: lever-muon
+  subject: implement Muon optimizer (orthogonalized momentum) for 2D core params in train.py and A/B it against AdamW at matched steps
+  status: pending
+- id: lever-retrain
+  subject: extended training run from best checkpoint with depth data + WSD recycling, then GRPO with depth reward; keep every lever that measurably moves the forge
+  status: pending
+- id: verify-forge-rerun
+  subject: full forge + 10-NPC demo on the new checkpoint; compare pass rate / flaw histogram / depth against the r8 baseline numbers
+  status: pending
+- id: docs-assertion-update
+  subject: update README scale assertion with measured lever outcomes (either depth moved = lever found, or stronger measured capacity evidence)
+  status: pending
+- id: fix-forge-passrate
+  subject: npc_forge.py dashboard pass-rate reads the append-mode failures file (all-history), printing negative/garbage pass rates; count this-run failures instead
+  status: pending
+- id: fix-forge-flywheel
+  subject: st_forge_data.jsonl is written by the forge but consumed by nothing -- the INJECT stage is a dead letter; wire it into st_prepare.py behind the decontam filter and start the forge files fresh for the new era
+  status: pending

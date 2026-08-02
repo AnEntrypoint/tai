@@ -26,7 +26,7 @@ import torch
 from tokenizers import Tokenizer
 
 from model import Config, TinyLM
-from npc_score import COMMON, INTENT_KEYS
+from npc_score import COMMON, INTENT_KEYS, TEMPLATE_ECHO
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "..", "data")
@@ -80,6 +80,9 @@ def grade(name, card_blob, qname, q, resp):
             break
     if "Description:" in body or "<START>" in body:
         flaws.append("card_continuation")
+    low = body.lower()
+    if any(t in low for t in TEMPLATE_ECHO):
+        flaws.append("template_echo")
     elif name.split()[0] not in body and qname == "identity":
         flaws.append("identity_missed")
     keys = INTENT_MAP[qname]
@@ -119,7 +122,7 @@ def main():
     ap.add_argument("ckpt")
     ap.add_argument("--cards", type=int, default=40)
     ap.add_argument("--k", type=int, default=6)
-    ap.add_argument("--tokens", type=int, default=48)
+    ap.add_argument("--tokens", type=int, default=96)
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
@@ -139,6 +142,7 @@ def main():
 
     histogram = Counter()
     n_resp = 0
+    n_fail = 0
     f_data = open(os.path.join(NPC, "st_forge_data.jsonl"), "a", encoding="utf-8")
     f_fail = open(os.path.join(NPC, "st_forge_failures.jsonl"), "a", encoding="utf-8")
 
@@ -161,6 +165,7 @@ def main():
                 if not stopped:
                     flaws.append("no_stop")
                 n_resp += 1
+                n_fail += bool(flaws)
                 for fl in flaws:
                     histogram[fl] += 1
                 if flaws:
@@ -171,9 +176,8 @@ def main():
     f_data.close()
     f_fail.close()
 
-    total = sum(histogram.values())
     print(f"\n=== forge dashboard ({n_resp} responses) ===")
-    print(f"pass rate: {(n_resp - len([1 for _ in open(os.path.join(NPC, 'st_forge_failures.jsonl'), encoding='utf-8')]) if os.path.exists(os.path.join(NPC, 'st_forge_failures.jsonl')) else 0)}/{n_resp}")
+    print(f"pass rate: {n_resp - n_fail}/{n_resp} = {(n_resp - n_fail) / max(1, n_resp):.0%}")
     for fl, c in histogram.most_common():
         print(f"  {fl:20s} {c:4d}  {c / n_resp:.0%}")
 

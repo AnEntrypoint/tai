@@ -42,6 +42,12 @@ INTENT_KEYS = {
     "Tell me about yourself.": ["i am", "i'm", "my name", "they call me", "i have", "i've", "my life", "my work", "my family"],
 }
 
+TEMPLATE_ECHO = ("i deal in what this place provides",
+                 "say what you need and i will name a price",
+                 "you are a new friend",
+                 "they say you ",
+                 "the user is seeking")
+
 
 def drift_names(text, system_blob):
     names = set()

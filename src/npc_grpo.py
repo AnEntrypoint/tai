@@ -1,10 +1,17 @@
 """GRPO-lite adherence RL for the NPC model (critic-free, DeepSeekMath-style).
 
 Per prompt: sample K responses from the current policy, score each with the
-rule-based adherence reward (no invented names, intent engagement, clean
-stop, non-trivial length), advantage = reward - group mean, and take a
-policy-gradient step on the sampled tokens' logprobs. No critic, no KL term
-at this scale -- short runs at tiny lr.
+rule-based adherence reward (no invented names, no template echo, intent
+engagement, clean stop, non-trivial length), advantage = reward - group mean,
+and take a policy-gradient step on the sampled tokens' logprobs. No critic;
+a KL anchor to the frozen starting policy at tiny lr.
+
+Prompts are chosen by adaptive difficulty: each prompt's running pass rate
+(mean reward >= 3.0) is tracked and the sampler draws from prompts in the
+15-85% learning zone plus fresh prompts (RL-scaling curriculum), instead of
+round-robin over already-saturated prompts. Response dedup is global across
+the whole run, so a template that farms the reward once is penalized on
+every later repeat.
 
 The reward is the npc_score rule set: this is exactly the RLAIF-for-dialogue-
 impression setup (arXiv:2501.12698) with a programmatic reward model, and the
@@ -13,6 +20,7 @@ Echoverse verifier-reads-rollouts loop with the scorer as the grounded grader.
 
 import argparse
 import os
+import random
 import re
 
 import torch
@@ -21,7 +29,7 @@ from tokenizers import Tokenizer
 
 from model import Config, TinyLM
 from npc_eval import PERSONAS
-from npc_score import COMMON, INTENT_KEYS, drift_names
+from npc_score import COMMON, INTENT_KEYS, TEMPLATE_ECHO, drift_names
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOK = os.path.join(HERE, "..", "data", "bpe32768.json")
@@ -111,6 +119,8 @@ def reward_of(text, stopped, q, bio):
     r += 1.0
     if "Description:" in body or "<START>" in body:
         return -0.5
+    if any(t in body.lower() for t in TEMPLATE_ECHO):
+        return -0.5
     keys = INTENT_KEYS.get(q)
     if keys is None or any(k in body.lower() for k in keys):
         r += 1.0
@@ -148,7 +158,7 @@ def main():
     ap.add_argument("--steps", type=int, default=300)
     ap.add_argument("--prompts", type=int, default=0, help="prompts per cycle; 0 = all")
     ap.add_argument("--k", type=int, default=8)
-    ap.add_argument("--tokens", type=int, default=48)
+    ap.add_argument("--tokens", type=int, default=96)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--temperature", type=float, default=0.8)
     ap.add_argument("--kl-beta", type=float, default=0.04)
@@ -178,9 +188,15 @@ def main():
         prompts = prompts[: args.prompts]
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
 
-    for step, (prompt, q, bio) in enumerate(prompts * ((args.steps // len(prompts)) + 1)):
-        if step >= args.steps:
-            break
+    stats = [[0, 0] for _ in prompts]
+    seen_global = {}
+    step_rng = random.Random(7)
+    for step in range(args.steps):
+        in_zone = [i for i, (a, p) in enumerate(stats) if a >= 2 and 0.15 <= p / a <= 0.85]
+        fresh = [i for i, (a, p) in enumerate(stats) if a < 2]
+        pool = (in_zone + fresh) or list(range(len(prompts)))
+        pidx = step_rng.choice(pool)
+        prompt, q, bio = prompts[pidx]
         ids = torch.tensor([tok.encode(prompt).ids], device=device)
         plen = ids.shape[1]
 
@@ -198,18 +214,19 @@ def main():
             rewards.append(reward_of(text, stopped, q, bio))
             seqs.append(row)
 
-        seen = {}
         for i, text in enumerate(texts):
             key = " ".join(text.split())[:120]
-            if key in seen:
+            if key in seen_global:
                 rewards[i] -= 0.5
-            seen[key] = True
+            seen_global[key] = True
 
         for text, r in zip(texts, rewards):
             if r < 1.5:
                 import json
                 failures.write(json.dumps({"bio": bio, "q": q, "response": text, "reward": r}) + "\n")
         mean_r = sum(rewards) / len(rewards)
+        stats[pidx][0] += 1
+        stats[pidx][1] += mean_r >= 3.0
         adv = torch.tensor([r - mean_r for r in rewards], device=device, dtype=torch.float32)
         if adv.abs().max() < 1e-6:
             continue

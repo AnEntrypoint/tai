@@ -3,8 +3,14 @@
 Mixture (interleaved, anti-overfit by construction):
   - chimbiwide real roleplay conversations, re-rendered to name-prefix ST
   - authored exemplars (st_authored*.jsonl, all ST features covered)
-  - a capped template subset from st_data.py output (binding grammar, ~15%)
+  - world-DB grounded conversations (st_world.jsonl: items, quests, places)
+  - forge rejection-sampled rollouts (st_forge_data.jsonl, the co-evolution
+    loop's injection stage)
+  - a capped combinatorial-template subset from st_data.py output (~15%)
   - a TinyStories token slice (~20%) so the model keeps general coherence
+
+All sources pass a decontamination filter (TOXIC substrings: the old fixed
+template and second-person meta-narrative seams) before tokenization.
 
 Output: data/train_npc.bin + data/val_npc.bin (uint16 + eot).
 """
@@ -22,6 +28,17 @@ NPC = os.path.join(DATA, "npc")
 TOK = os.path.join(DATA, "bpe32768.json")
 TEMPLATE_CAP = 6000
 TINYSTORIES_TOKENS = 4_000_000
+
+TOXIC = ("i deal in what this place provides",
+         "say what you need and i will name a price",
+         "you are a new friend",
+         "they say you ",
+         "the user is seeking")
+
+
+def clean(text):
+    low = text.lower()
+    return not any(t in low for t in TOXIC)
 
 
 def name_of(system_text):
@@ -84,18 +101,33 @@ def main():
     for path in ("npc_dialogue.jsonl", "rpg-quests-dialogue.jsonl"):
         for row in read_jsonl(os.path.join(NPC, path)):
             r = rerender_real(row)
-            if r:
+            if r and clean(r):
                 texts.append(r)
     n_real = len(texts)
 
     for path in ("st_authored.jsonl", "st_authored2.jsonl"):
         for row in read_jsonl(os.path.join(NPC, path)):
-            texts.append(row["text"])
+            if clean(row["text"]):
+                texts.append(row["text"])
     n_auth = len(texts) - n_real
 
-    tmpl = [row["text"] for row in read_jsonl(os.path.join(NPC, "st_conversations.jsonl"))]
+    n_world = 0
+    for row in read_jsonl(os.path.join(NPC, "st_world.jsonl")):
+        if clean(row["text"]):
+            texts.append(row["text"])
+            n_world += 1
+
+    n_forge = 0
+    forge_path = os.path.join(NPC, "st_forge_data.jsonl")
+    if os.path.exists(forge_path):
+        for row in read_jsonl(forge_path):
+            if clean(row["text"]):
+                texts.append(row["text"])
+                n_forge += 1
+
+    tmpl = [row["text"] for row in read_jsonl(os.path.join(NPC, "st_conversations.jsonl")) if clean(row["text"])]
     texts.extend(tmpl[:TEMPLATE_CAP])
-    print(f"real {n_real} | authored {n_auth} | template {TEMPLATE_CAP} | total {len(texts)}")
+    print(f"real {n_real} | authored {n_auth} | world {n_world} | forge {n_forge} | template {min(len(tmpl), TEMPLATE_CAP)} | total {len(texts)}")
 
     ids = []
     for i, enc in enumerate(encode(texts)):

@@ -56,6 +56,23 @@ def lr_at(step, total, peak, warmup, stable_frac=0.6):
     return peak * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * p)))
 
 
+@torch.no_grad()
+def zeropower_via_newtonschulz5(G, steps=5):
+    a, b, c = (3.4445, -4.7750, 2.0315)
+    X = G.to(torch.bfloat16)
+    transposed = G.size(0) > G.size(1)
+    if transposed:
+        X = X.T
+    X = X / (X.norm() + 1e-7)
+    for _ in range(steps):
+        A = X @ X.T
+        B = b * A + c * A @ A
+        X = a * X + B @ X
+    if transposed:
+        X = X.T
+    return X.to(G.dtype)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -68,6 +85,10 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--seq-len", type=int, default=512)
     ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--optimizer", choices=["adamw", "muon"], default="adamw",
+                    help="muon orthogonalizes momentum updates on the 2D core matrices (Newton-Schulz), AdamW handles embeddings/tables/norms")
+    ap.add_argument("--muon-lr", type=float, default=0.02)
+    ap.add_argument("--muon-momentum", type=float, default=0.95)
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--stable-frac", type=float, default=0.6,
                     help="WSD: fraction of post-warmup steps held at peak lr before decay")
@@ -111,11 +132,13 @@ def main():
     decay, no_decay = [], []
     for n, p in model.named_parameters():
         (no_decay if p.ndim < 2 or "table" in n or "tok_emb" in n else decay).append(p)
+    adam_decay = [] if args.optimizer == "muon" else decay
     opt = torch.optim.AdamW(
-        [{"params": decay, "weight_decay": 0.1}, {"params": no_decay, "weight_decay": 0.0}],
+        [{"params": adam_decay, "weight_decay": 0.1}, {"params": no_decay, "weight_decay": 0.0}],
         lr=args.lr,
         betas=(0.9, 0.95),
     )
+    muon_bufs = [torch.zeros_like(p) for p in decay] if args.optimizer == "muon" else []
 
     train_b = Batcher("train", args.batch_size, args.seq_len, device, suffix)
     val_b = Batcher("val", args.batch_size, args.seq_len, device, suffix)
@@ -134,6 +157,14 @@ def main():
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
+        if args.optimizer == "muon":
+            muon_lr = lr_at(step, args.steps, args.muon_lr, args.warmup, args.stable_frac)
+            with torch.no_grad():
+                for p, buf in zip(decay, muon_bufs):
+                    buf.lerp_(p.grad, 1 - args.muon_momentum)
+                    u = p.grad.lerp(buf, args.muon_momentum)
+                    p.add_(zeropower_via_newtonschulz5(u),
+                           alpha=-muon_lr * max(1.0, p.size(0) / p.size(1)) ** 0.5)
 
         if step % args.eval_every == 0 or step == args.steps - 1:
             vl = evaluate(model, val_b, args.eval_iters)
