@@ -110,6 +110,10 @@ the CPU saturates near 5k tok/s aggregate however configured.) The crossover
 is around 2-4 streams; at 16+ streams the GPU is 3.5-7x. Rule of thumb:
 single NPC -> CPU, a scene full of NPCs -> GPU batch.
 
+`src/npc_demo_batch.py` runs the canonical demo: 10 different NPC personas
+with 10 different player questions generated as one batched pass
+(`DEMO_SEED=11 uv run python src/npc_demo_batch.py`).
+
 ## Model format
 
 tai reads the same `PLE1` model.bin the ESP32 firmware uses: a flat,
