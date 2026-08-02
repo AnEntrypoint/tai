@@ -90,6 +90,26 @@ runtime's 4289-5766 -- at 28.9M params single-stream decode is
 kernel-serialization-bound on GPU and bandwidth-trivial on CPU, so the CPU
 wins decode while the GPU wins prefill (29,798 tok/s) and training.
 
+Many streams (a game full of NPCs) flip that verdict. The batched engine
+(`src/gpu_batch_infer.py`) captures one CUDA graph serving B streams per
+replay -- per-stream positions and causal masks, per-stream exactness
+verified against the plain model -- and the same weight reads amortize
+across all of them:
+
+| streams | CPU aggregate | GPU batch aggregate |
+|---:|---:|---:|
+| 1 | 4289 | 1447 |
+| 4 | 2469 | 4938 |
+| 8 | 4324 | 9283 |
+| 16 | 4923 | 17385 |
+| 32 | ~5000 (saturated) | 25547 |
+| 64 | ~5000 (saturated) | 34595 |
+
+(CPU baseline: N concurrent `tai generate --threads 1` processes, wall-timed;
+the CPU saturates near 5k tok/s aggregate however configured.) The crossover
+is around 2-4 streams; at 16+ streams the GPU is 3.5-7x. Rule of thumb:
+single NPC -> CPU, a scene full of NPCs -> GPU batch.
+
 ## Model format
 
 tai reads the same `PLE1` model.bin the ESP32 firmware uses: a flat,
