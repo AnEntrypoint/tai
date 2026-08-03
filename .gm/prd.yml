@@ -16,38 +16,48 @@
   witness: st_conversations 38850 rows / 16.25M tokens / 12.3 epochs at 200M; resp p50=45 tok; 6410 deal_in_place + 2917 they-say-you contaminated slots; bins hold 6000 template rows vs ~16 template skeletons = ~1500 reps each
 - id: lever-depth-metric
   subject: 'RESCOPED: non-word rate measured low (0.5%%); the real gap is specificity -- add template_echo flaw (known high-freq skeletons) + cross-prompt response dedup to forge grader and GRPO reward'
-  status: pending
+  status: completed
+  witness: template_echo flaw fired 81%% on r8 baseline (previously invisible), 0%% on all r9 checkpoints; GRPO template penalty + run-global dedup witnessed in st-grpo-r9*.log
 - id: lever-long-gen
   subject: extend forge and GRPO generation windows from 48 to 96-128 tokens so depth is actually exercised and graded
-  status: pending
+  status: completed
+  witness: forge and GRPO default windows now 96 tokens; all r9-era runs (forge dashboards, st-grpo-r9 logs) executed at 96
 - id: lever-adaptive-grpo
   subject: 'adaptive-difficulty prompt selection in npc_grpo: track per-prompt pass rate, sample prompts in the 20-80% learning zone (RL-scaling curriculum)'
-  status: pending
+  status: completed
+  witness: 'pass-zone sampler witnessed live in st-grpo-r9.log/r9b/r9c/r9d: varied prompt questions per step, stats-tracked pass rates, fresh+in-zone pool selection'
 - id: lever-synth-depth
   subject: 'RESCOPED: rewrite st_data.py/npc_synth.py generators -- combinatorial template banks (10+ per intent), no raw 2nd-person scenario splicing, world-DB grounded fragments; regenerate st_conversations.jsonl; add decontam filter in st_prepare.py; rebuild bins'
   status: completed
   witness: 'st_data.py rewritten combinatorially (ITEMS-grounded, no raw scen splice); regenerated 38774 rows: 0 toxic-template, 0 meta-narrative in response slots (166 header hits are legit card text); st_prepare.py now includes st_world.jsonl (900) + TOXIC decontam filter; bins rebuilt 10.5M train tokens'
 - id: lever-muon
   subject: implement Muon optimizer (orthogonalized momentum) for 2D core params in train.py and A/B it against AdamW at matched steps
-  status: pending
+  status: completed
+  witness: 'matched 800-step A/B on identical bins: muon val 3.4406 ppl 31.20 vs adamw val 2.9042 ppl 18.25; AdamW wins at this scale, documented in README, flag retained'
 - id: lever-retrain
   subject: extended training run from best checkpoint with depth data + WSD recycling, then GRPO with depth reward; keep every lever that measurably moves the forge
-  status: pending
+  status: completed
+  witness: 'r9 top-up (val 2.325, no overfit) + 3 GRPO rounds on decontaminated bins; honest template-aware forge: 3%% (r8) -> 30%% (r9-grpo) -> 46%% (r9-grpo2); ship runs/ple-st-r9-grpo2.pt'
 - id: verify-forge-rerun
   subject: full forge + 10-NPC demo on the new checkpoint; compare pass rate / flaw histogram / depth against the r8 baseline numbers
-  status: pending
+  status: completed
+  witness: template-aware forge run this session on r8 baseline (3%%) and all four r9-era checkpoints (30%%/46%%/2%%-collapsed/40%%); best checkpoint selected by measurement; Rust runtime generation verified on exported model.bin
 - id: docs-assertion-update
   subject: update README scale assertion with measured lever outcomes (either depth moved = lever found, or stronger measured capacity evidence)
   status: pending
 - id: fix-forge-passrate
   subject: npc_forge.py dashboard pass-rate reads the append-mode failures file (all-history), printing negative/garbage pass rates; count this-run failures instead
-  status: pending
+  status: completed
+  witness: 'forge now prints per-run pass counts witnessed across five runs this session: 23/720, 219/720, 333/720, 14/720, 289/720'
 - id: fix-forge-flywheel
   subject: st_forge_data.jsonl is written by the forge but consumed by nothing -- the INJECT stage is a dead letter; wire it into st_prepare.py behind the decontam filter and start the forge files fresh for the new era
-  status: pending
+  status: completed
+  witness: 'st_prepare.py mixture line witnessed: real 3649 | authored 26 | world 900 | forge 878 | template 6000; bins rebuilt 10.8M train tokens with forge rows included'
 - id: lever-repetition
   subject: r9-grpo forge shows 25% n-gram looping (The old road through x3) once the template died; add ngram_repeat penalty to GRPO reward and rerun; intent keys modernized to grounded style
-  status: pending
+  status: completed
+  witness: ngram_repeat penalty in reward_of; forge repetition 25%% (r9-grpo) -> 0.4%% (r9-grpo2, 3/720) across 720-rollout sweeps
 - id: fix-grpo-norm
   subject: GRPO round 3 collapsed (no_stop 95%%, pass 2%%) after loss spikes +50; resp_lp sums logprobs over the response so doubling the window to 96 tokens doubled the policy-gradient scale; normalize per-token and retry from grpo2 at lower lr
-  status: pending
+  status: completed
+  witness: per-token mean logprob + std-normalized advantage; round-3 retry loss +-0.07 vs +-50 pre-fix; grpo3n stable at 40%% pass, no collapse
