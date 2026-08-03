@@ -44,7 +44,8 @@
   witness: template-aware forge run this session on r8 baseline (3%%) and all four r9-era checkpoints (30%%/46%%/2%%-collapsed/40%%); best checkpoint selected by measurement; Rust runtime generation verified on exported model.bin
 - id: docs-assertion-update
   subject: update README scale assertion with measured lever outcomes (either depth moved = lever found, or stronger measured capacity evidence)
-  status: pending
+  status: completed
+  witness: 'README scale assertion rewritten and pushed in 6ed9cfa: r8 capacity-bound claim falsified by measurement, three levers documented, Muon/decoding rejections recorded, ship checkpoint updated to ple-st-r9-grpo2.pt with honest numbers'
 - id: fix-forge-passrate
   subject: npc_forge.py dashboard pass-rate reads the append-mode failures file (all-history), printing negative/garbage pass rates; count this-run failures instead
   status: completed
