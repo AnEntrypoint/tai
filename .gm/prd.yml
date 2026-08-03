@@ -90,3 +90,39 @@
   subject: 'forge passing rows are stored as single-exchange convos ending at the NPC turn, so flywheel SFT taught response->eot instead of response->Player: (r11 no_stop 43-46%% vs r9 1-8%%); write rows with the turn marker, repair existing st_forge_data.jsonl, rebuild, retrain'
   status: completed
   witness: forge writer now stores rows with the turn marker; 1720 existing rows repaired; r12 no_stop 43->33%%, r13 6%% after the added stop penalty; bins rebuilt each round (forge 878->3106 rows)
+- id: arc-dialog-only
+  subject: 'NPC outputs must be dialog only, no action asterisks: measure action-beat rate in data + model, strip from generators/forge data, add action_text flaw to grader and penalty to reward, retrain'
+  status: pending
+- id: arc-action-triggers
+  subject: 'design + train machine-readable action outputs (e.g. [GOTO: place] only for known places, [USE: object] only when the object is really available in context); grader verifies against world DB; most efficient trigger encoding'
+  status: pending
+- id: arc-round-script
+  subject: one repeatable script driving a full training round (prepare -> SFT -> GRPO -> forge -> report) with instructions; every future round runs through it
+  status: pending
+- id: arc-economy-sim
+  subject: economy simulation where NPCs buy/sell/price/restock over time; the sim state gives a decision oracle -> synthetic gold choices per situation -> training data; bad model outputs become bad life decisions in-sim, tolerated and corrected
+  status: pending
+- id: arc-sim-eval
+  subject: 'test harness for simulation-format adherence: respond vs interact distinction, format compliance rate, good-choice rate vs oracle; runs every round'
+  status: pending
+- id: arc-continual-balance
+  subject: 'balanced continual state: interleave corrected sim output with general/RP data to prevent overfit; genuine-self-improvement test in runtime (held-out sim scenarios each round, must improve not just fit)'
+  status: pending
+- id: arc-repo-split
+  subject: 'split repos: this repo = inference; AnEntrypoint/traintai = training material (data, generators, sim, training scripts); traintai as a submodule of the inference repo'
+  status: pending
+- id: arc-diminishing-protocol
+  subject: 'max-progress-first scheduling: always train the lever with the largest measured headroom, switch when roughly maxed, revisit later to check unlocked gains; document the protocol and current lever ranking'
+  status: pending
+- id: arc-agents-levers
+  subject: 'AGENTS.md living document: primary discovered levers per process part (data, reward, schedule, sim, eval), updated every round; infer likely-next levers from historical successes'
+  status: pending
+- id: arc-web-research
+  subject: web research pass on game-NPC action schemas / economy sims for small LMs (inspiration for trigger encoding + sim design), findings folded into arc-action-triggers and arc-economy-sim
+  status: pending
+- id: arc-gains-projection
+  subject: project expected gains from further prepared training vs sim self-improvement, from measured round deltas; written into AGENTS.md and README
+  status: pending
+- id: lever-action-reward
+  subject: 'r16: dialog-only solved (92->0%%) but oracle GOTO 9%%/DEAL 5%%/abstain 71%% -- GRPO reward cannot see action correctness and sim prompts are not in the pool; add oracle-labeled sim prompts to GRPO with action match/abstention reward terms'
+  status: pending
