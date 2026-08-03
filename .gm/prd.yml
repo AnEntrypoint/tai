@@ -138,3 +138,6 @@
   subject: 'r16: dialog-only solved (92->0%%) but oracle GOTO 9%%/DEAL 5%%/abstain 71%% -- GRPO reward cannot see action correctness and sim prompts are not in the pool; add oracle-labeled sim prompts to GRPO with action match/abstention reward terms'
   status: completed
   witness: oracle sim prompts + action terms shipped in npc_grpo (r17 run); measured overshoot to abstention (GOTO/DEAL 0%%, forge 66%%); r16 kept ship; partial-credit v2 recorded in AGENTS.md as the follow-up
+- id: lever-action-reward-v2
+  subject: 'partial-credit action reward (recorded lever, never implemented): oracle-miss-by-abstention -0.8, right-verb-wrong-arg -0.2, wrong-verb -0.6, exact +1.0; unwarranted-valid -0.3; fixes r17 overshoot-to-abstention safe-optimum'
+  status: pending
