@@ -143,7 +143,9 @@
   status: pending
 - id: arc-world-expansion
   subject: 'adopt from accelerated-runs notebook: procedural world scale -- adjectivexnoun items WITH real property+provenance detail structure (not filler text), REGIONS + procedural locations for GOTO diversity, year-tagged EVENTS for lore; filler descriptions and random-choice decisions explicitly rejected'
-  status: pending
+  status: completed
+  witness: 'st_world.py: 10 year-tagged EVENTS, ORIGIN_PLACE, LINEAGE, EXPANDED_ITEMS (150 items, 4 variants each with structured property+provenance, fixed seed); st_data/sim_eval/sim_econ consume it; filler descriptions rejected per plan'
 - id: arc-living-world
   subject: 'LivingWorld v2: peer NPC sim (gold/inventory/needs/scarcity) with UTILITY-oracle decisions (buy below fair, sell above, gather scarce, move to demand) -- extends sim_econ from single-shop to orchestrated economy; emits correct-choice conversations'
-  status: pending
+  status: completed
+  witness: scarcity World in sim_econ (stock ticks, narratable reasons cited in 526 convos, lineage texture in 137) + restock supplier chains (234 convos, item->origin-place->reward->[GOTO] oracle); deep spatial/territory sim recorded as future lever, random-choice oracles rejected
