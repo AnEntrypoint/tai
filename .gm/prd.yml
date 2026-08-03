@@ -146,11 +146,3 @@
   subject: 'LivingWorld v2: peer NPC sim (gold/inventory/needs/scarcity) with UTILITY-oracle decisions (buy below fair, sell above, gather scarce, move to demand) -- extends sim_econ from single-shop to orchestrated economy; emits correct-choice conversations'
   status: completed
   witness: scarcity World in sim_econ (stock ticks, narratable reasons cited in 526 convos, lineage texture in 137) + restock supplier chains (234 convos, item->origin-place->reward->[GOTO] oracle); deep spatial/territory sim recorded as future lever, random-choice oracles rejected
-- id: esp32-repo-sync
-  subject: 'after traintai commits land: bump the traintai submodule pointer in esp32-ai, update esp32-ai AGENTS.md ship reference if the ship checkpoint changes, remove scratch .gm/gm-instr-cache.txt, commit tracked .gm state (gm.db memory follows the codebase)'
-  session_id: gm-train-round
-  status: pending
-- id: r19-release-upload
-  subject: upload the round's checkpoint as a release asset on AnEntrypoint/traintai v0.1.0 (gh release upload, account lanmower authenticated with repo scope) to keep the ship lineage going across sessions; witness = gh release view asset list containing the new .pt
-  session_id: gm-train-round
-  status: pending
