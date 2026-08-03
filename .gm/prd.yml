@@ -138,9 +138,6 @@
   subject: 'r16: dialog-only solved (92->0%%) but oracle GOTO 9%%/DEAL 5%%/abstain 71%% -- GRPO reward cannot see action correctness and sim prompts are not in the pool; add oracle-labeled sim prompts to GRPO with action match/abstention reward terms'
   status: completed
   witness: oracle sim prompts + action terms shipped in npc_grpo (r17 run); measured overshoot to abstention (GOTO/DEAL 0%%, forge 66%%); r16 kept ship; partial-credit v2 recorded in AGENTS.md as the follow-up
-- id: lever-action-reward-v2
-  subject: 'partial-credit action reward (recorded lever, never implemented): oracle-miss-by-abstention -0.8, right-verb-wrong-arg -0.2, wrong-verb -0.6, exact +1.0; unwarranted-valid -0.3; fixes r17 overshoot-to-abstention safe-optimum'
-  status: pending
 - id: arc-world-expansion
   subject: 'adopt from accelerated-runs notebook: procedural world scale -- adjectivexnoun items WITH real property+provenance detail structure (not filler text), REGIONS + procedural locations for GOTO diversity, year-tagged EVENTS for lore; filler descriptions and random-choice decisions explicitly rejected'
   status: completed
@@ -149,3 +146,11 @@
   subject: 'LivingWorld v2: peer NPC sim (gold/inventory/needs/scarcity) with UTILITY-oracle decisions (buy below fair, sell above, gather scarce, move to demand) -- extends sim_econ from single-shop to orchestrated economy; emits correct-choice conversations'
   status: completed
   witness: scarcity World in sim_econ (stock ticks, narratable reasons cited in 526 convos, lineage texture in 137) + restock supplier chains (234 convos, item->origin-place->reward->[GOTO] oracle); deep spatial/territory sim recorded as future lever, random-choice oracles rejected
+- id: esp32-repo-sync
+  subject: 'after traintai commits land: bump the traintai submodule pointer in esp32-ai, update esp32-ai AGENTS.md ship reference if the ship checkpoint changes, remove scratch .gm/gm-instr-cache.txt, commit tracked .gm state (gm.db memory follows the codebase)'
+  session_id: gm-train-round
+  status: pending
+- id: r19-release-upload
+  subject: upload the round's checkpoint as a release asset on AnEntrypoint/traintai v0.1.0 (gh release upload, account lanmower authenticated with repo scope) to keep the ship lineage going across sessions; witness = gh release view asset list containing the new .pt
+  session_id: gm-train-round
+  status: pending
