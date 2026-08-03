@@ -70,3 +70,23 @@
   subject: 'inference prompts everywhere ended with Name: (no trailing space) while training rows use Name:<space>response -- off-distribution by one token; fixed in forge/GRPO/demo/diag probes; measure forge delta on grpo2 and one GRPO round with the corrected prompt'
   status: completed
   witness: 'three-way measurement: grpo2 no-space 46%% (best), grpo2 space 32%%, space-adapted r10 collapsed 4%%/no_stop 89%%; no-space prompt confirmed as deployment convention, edits reverted to the 46%% byte state, README documents the result'
+- id: lever-reward-coverage
+  subject: 'GRPO reward coverage gaps: ST 6-question intent keys (currently free +1 for 4 of 6 question types), identity-name term, object-grounding term, ST stop-marker detection (### markers only today), remove any-newline stop freebie'
+  status: completed
+  witness: ST_INTENT_KEYS for all 6 questions in npc_score; reward now penalizes intent miss, identity-name miss (identity 11->3%%), object ungrounded (15->3%%); ST stop-marker detection + truncation in GRPO loop; newline freebie removed
+- id: lever-depth-chain
+  subject: add per-sentence chain-coherence metric to the forge grader (each sentence must share content words with card or previous sentence) -- first real depth measurement, report-only at first
+  status: completed
+  witness: 'chain_depth in npc_forge dashboard, report-only: mean grounded-sentence chains 0.07-0.12 across r11-r15 sweeps -- depth measured as still shallow, documented for the sim arc'
+- id: lever-r11-flywheel
+  subject: SFT top-up from ple-st-r9-grpo2 on the 10.8M bins (878+ forge rejection rows), then GRPO rounds with the expanded reward; ship only if honest forge beats 46%%
+  status: completed
+  witness: 'five full flywheel rounds r11-r15 (SFT on rebuilt bins + GRPO): 42/48/70/74/73%% -- ship ple-st-r14-grpo.pt at 74%%, r15 flat = saturation'
+- id: verify-r11
+  subject: forge comparison r11 chain vs grpo2 46%% baseline; export best to model.bin + Rust runtime witness; README numbers update; push
+  status: completed
+  witness: forge comparison across all r11-r15 checkpoints vs the 46%% baseline; r14 exported to firmware/model/model.bin and witnessed generating in the Rust runtime; README updated with the round table and saturation note
+- id: fix-flywheel-marker
+  subject: 'forge passing rows are stored as single-exchange convos ending at the NPC turn, so flywheel SFT taught response->eot instead of response->Player: (r11 no_stop 43-46%% vs r9 1-8%%); write rows with the turn marker, repair existing st_forge_data.jsonl, rebuild, retrain'
+  status: completed
+  witness: forge writer now stores rows with the turn marker; 1720 existing rows repaired; r12 no_stop 43->33%%, r13 6%% after the added stop penalty; bins rebuilt each round (forge 878->3106 rows)

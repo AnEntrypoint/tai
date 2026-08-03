@@ -31,7 +31,7 @@ from tokenizers import Tokenizer
 
 from model import Config, TinyLM
 from npc_eval import PERSONAS
-from npc_score import COMMON, INTENT_KEYS, TEMPLATE_ECHO, drift_names, ngram_repeat
+from npc_score import COMMON, INTENT_KEYS, ST_INTENT_KEYS, TEMPLATE_ECHO, drift_names, ngram_repeat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOK = os.path.join(HERE, "..", "data", "bpe32768.json")
@@ -123,17 +123,27 @@ def reward_of(text, stopped, q, bio):
         return -0.5
     if any(t in body.lower() for t in TEMPLATE_ECHO):
         return -0.5
-    keys = INTENT_KEYS.get(q)
+    keys = ST_INTENT_KEYS.get(q) or INTENT_KEYS.get(q)
     if keys is None or any(k in body.lower() for k in keys):
         r += 1.0
+    else:
+        r -= 0.5
     blob_words = set(w for w in re.findall(r"[a-z]{5,}", bio.lower())
                      if w not in {"about", "their", "would", "could", "should", "there", "which",
                                   "these", "those", "where", "every", "player", "start"})
     body_words = set(re.findall(r"[a-z]{5,}", body.lower()))
-    if blob_words & body_words:
+    overlap = bool(blob_words & body_words)
+    if overlap:
         r += 1.0
-    if stopped or (chr(10) + "Player:") in text or chr(10) in body:
+    if q == "Tell me about yourself." and chr(10) in bio:
+        first = bio.split(chr(10))[-1].strip().split()[0]
+        r += 0.5 if first in body else -0.5
+    if q == "Is that thing on your table for sale?" and not overlap:
+        r -= 0.5
+    if stopped or (chr(10) + "Player:") in text:
         r += 0.5
+    else:
+        r -= 0.5
     if len(body) >= 24:
         r += 0.5
     if ngram_repeat(body):
@@ -212,8 +222,10 @@ def main():
         for row in full:
             resp = row[plen:].tolist()
             text = tok.decode(resp)
-            stops = [c for c in (text.find("### Player:"), text.find("### System:")) if c >= 0]
+            stops = [c for c in (text.find("\nPlayer:"), text.find("### Player:"), text.find("### System:")) if c >= 0]
             stopped = bool(stops)
+            if stops:
+                text = text[: min(stops)]
             texts.append(text)
             rewards.append(reward_of(text, stopped, q, bio))
             seqs.append(row)

@@ -66,6 +66,21 @@ def content_words(text):
     return set(w for w in re.findall(r"[a-z]{5,}", text.lower()) if w not in {"about", "their", "would", "could", "should", "there", "which", "these", "those", "where", "every"})
 
 
+def chain_depth(card_blob, body):
+    blob = content_words(card_blob)
+    sents = [s.strip() for s in re.split(r"[.!?]\s", body) if s.strip()]
+    depth = 0
+    prev = set(blob)
+    for s in sents:
+        w = content_words(s)
+        if w & prev or w & blob:
+            depth += 1
+            prev = prev | w
+        else:
+            break
+    return depth
+
+
 def grade(name, card_blob, qname, q, resp):
     flaws = []
     if resp.lstrip().startswith(("Player:", "###")):
@@ -144,6 +159,8 @@ def main():
     histogram = Counter()
     n_resp = 0
     n_fail = 0
+    depth_total = 0
+    depth_hist = Counter()
     f_data = open(os.path.join(NPC, "st_forge_data.jsonl"), "a", encoding="utf-8")
     f_fail = open(os.path.join(NPC, "st_forge_failures.jsonl"), "a", encoding="utf-8")
 
@@ -167,18 +184,23 @@ def main():
                     flaws.append("no_stop")
                 n_resp += 1
                 n_fail += bool(flaws)
+                d = chain_depth(blob, text)
+                depth_total += d
+                depth_hist[d] += 1
                 for fl in flaws:
                     histogram[fl] += 1
                 if flaws:
                     f_fail.write(json.dumps({"name": name, "q": q, "resp": text.strip(), "flaws": flaws}) + "\n")
                 else:
-                    convo = f"{prompt} {text.strip()}\n"
+                    convo = f"{prompt} {text.strip()}\nPlayer:\n"
                     f_data.write(json.dumps({"text": convo}) + "\n")
     f_data.close()
     f_fail.close()
 
     print(f"\n=== forge dashboard ({n_resp} responses) ===")
     print(f"pass rate: {n_resp - n_fail}/{n_resp} = {(n_resp - n_fail) / max(1, n_resp):.0%}")
+    print(f"chain depth (grounded sentences before first drift): mean {depth_total / max(1, n_resp):.2f} | " +
+          " ".join(f"{d}:{c}" for d, c in sorted(depth_hist.items())))
     for fl, c in histogram.most_common():
         print(f"  {fl:20s} {c:4d}  {c / n_resp:.0%}")
 

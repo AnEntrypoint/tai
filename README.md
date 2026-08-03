@@ -76,12 +76,21 @@ Each claim below has a number behind it, measured by `src/npc_forge.py`
 | **GRPO (critic-free, DeepSeekMath-style)** | **identity + stopping** | **persona_swap -> 0.1-2%, no_stop 94% -> 2%, pass rate 3% -> 55%** |
 | world-DB grounded SFT | grounded onsets | answers open with real items at real prices (object_ungrounded 0.5%) |
 | **decontaminated data engine + anti-template GRPO** | **the actual ceiling removed** | **template_echo 81% -> 0%, honest pass 3% -> 30% -> 46% in two rounds** |
+| reward coverage + flywheel repair + stop penalty | the remaining flaw classes | pass 46% -> 48% -> 70% -> **74%**; intent 23->13%, identity 11->3%, object 15->3%, no_stop 33->6%, persona 0% |
+| r15 saturation probe | prepared-training returns measured | r15 flat at 73% (r14 74%) -- this recipe's diminishing-returns point |
 
 The forge is the co-evolution loop: generate, grade (persona_swap, card
 continuation, template echo, intent, stop, grounding, repetition), inject
 repairs, retrain. An LLM judges the dashboards between rounds; the rule
 grader itself was caught over-firing once (83% "drift" that was really 1%
 persona swap) and under-firing once (blind to template echo, below).
+
+Round-11+ findings, each root-caused before fixing: the GRPO reward
+silently gave full intent credit to 4 of 6 ST question types (intent
+lever was unmeasurable, not weak); the forge's rejection-sampled rows
+ended at the NPC turn, so flywheel SFT taught response->eot and no_stop
+exploded to 43% (fixed by storing rows with the turn marker); an
+explicit -0.5 no-stop penalty then crushed no_stop 33% -> 6%.
 
 ## The scale assertion, revised by measurement (round 9)
 
@@ -134,11 +143,14 @@ no_stop 89%). The GRPO-trained policy owns its prompt convention:
 `Dorn:` with no trailing space is the deployment form, in the forge,
 the demo, and the runtime example below.
 
-Ship checkpoint: `runs/ple-st-r9-grpo2.pt` (decontaminated SFT + GRPO
-round 2): honest forge pass 46%, template_echo 0%, repetition 0.4%,
-persona_swap 0%, across 720-rollout sweeps on the template-aware grader.
-GRPO rounds past two oscillate (40-46%) -- saturation, not collapse;
-the normalized objective keeps them stable.
+Ship checkpoint: `runs/ple-st-r14-grpo.pt` (decontaminated SFT + flywheel
+rejection data + GRPO with full-coverage reward): honest forge pass 74%,
+template_echo 0%, repetition 3%, persona_swap ~0%, no_stop 7%, across
+720-rollout sweeps on the template-aware grader. r15 probed one more
+identical round and came back flat (73%), marking the point where this
+prepared-data recipe stops paying; the next gains live in narrowing the
+output scope (dialog-only, machine-readable action triggers) and in
+simulation-oracle training data.
 
 In the runtime:
 

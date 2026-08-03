@@ -42,6 +42,16 @@ INTENT_KEYS = {
     "Tell me about yourself.": ["i am", "i'm", "my name", "they call me", "call me", "the name is", "i have", "i've", "my life", "my work", "my family", "my trade", "my living"],
 }
 
+ST_INTENT_KEYS = {
+    "Tell me about yourself.": INTENT_KEYS["Tell me about yourself."],
+    "What do you have for sale?": INTENT_KEYS["What do you have for sale?"],
+    "Do you have a quest for me?": ["quest", "task", "help", "need", "work", "do that", "want", "bring", "find", "carried", "clear"],
+    "Any stories from these parts?": ["story", "stories", "heard", "they say", "tale", "legend", "history",
+                                      "old road", "folk", "mill", "bell", "chapel", "comet", "keep", "winter", "mother swore"],
+    "Where are we?": ["here", "this place", "you stand", "village", "town", "city", "crossing", "friend"],
+    "Hello.": INTENT_KEYS["Hello there."],
+}
+
 TEMPLATE_ECHO = ("i deal in what this place provides",
                  "say what you need and i will name a price",
                  "you are a new friend",
