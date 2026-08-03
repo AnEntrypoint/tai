@@ -126,7 +126,13 @@ on identical bins (`--optimizer muon` remains in train.py for larger
 horizons where Muon's advantage is documented to appear). Decoding
 (temperature/top-k grid) moves nothing structural: the template onset
 was identical from greedy to t=0.9, which is what first proved the
-problem was in the data, not the sampler.
+problem was in the data, not the sampler. Response prompts with a
+space after the name colon (`Dorn: `, matching the training rows
+literally) also lose: 32% vs 46% on the same checkpoint, and a GRPO
+round adapted to the spaced prompt collapsed stopping entirely (4%,
+no_stop 89%). The GRPO-trained policy owns its prompt convention:
+`Dorn:` with no trailing space is the deployment form, in the forge,
+the demo, and the runtime example below.
 
 Ship checkpoint: `runs/ple-st-r9-grpo2.pt` (decontaminated SFT + GRPO
 round 2): honest forge pass 46%, template_echo 0%, repetition 0.4%,

@@ -1,7 +1,9 @@
 """Demo: 10 NPC conversations generated as one batched GPU pass.
 
 Ten personas with ten player questions run through the batched CUDA-graph
-engine (src/gpu_batch_infer.py), greedy, then cut at the turn markers.
+engine (src/gpu_batch_infer.py) against the ship checkpoint, sampled, then
+cut at the turn markers. Prompts are SillyTavern format -- card fields plus
+name-prefixed turns -- matching what the model is trained for.
 """
 
 import os
@@ -57,20 +59,24 @@ PERSONAS = [
 
 
 SEED = int(os.environ.get("DEMO_SEED", "1"))
+CKPT = os.environ.get("DEMO_CKPT", "../runs/ple-st-r9-grpo2.pt")
 
 
 def main():
     tok = Tokenizer.from_file("../data/bpe32768.json")
     b = len(PERSONAS)
-    eng = BatchEngine("../runs/ple-npc-grpo3.pt", b)
+    eng = BatchEngine(CKPT, b)
     eng.capture()
 
     prompts = []
     for name, bio, loc, q in PERSONAS:
-        text = (f"### System:\nEnter roleplay mode. You are {name.split(',')[0]}. "
-                f"Background: {bio} Current Location: {loc} "
-                f"Roleplaying Instructions: - Speak in character - Keep responses conversational.\n"
-                f"### Player:\n{q}\n### NPC:\n")
+        short = name.split(',')[0]
+        text = (f"Description: {bio}\n"
+                f"Scenario: {loc}\n"
+                f"<START>\n"
+                f"{short}: *looks up as you approach* Well met. What brings you through?\n"
+                f"Player: {q}\n"
+                f"{short}:")
         prompts.append(tok.encode(text).ids)
 
     cur = torch.zeros(b, dtype=torch.long, device="cuda")
@@ -106,17 +112,16 @@ def main():
 
     for i, (name, bio, loc, q) in enumerate(PERSONAS):
         text = tok.decode(generated[i])
-        stops = [c for c in (text.find("### Player:"), text.find("### System:")) if c >= 0]
+        stops = [c for c in (text.find("\nPlayer:"), text.find("Player:"), text.find("### ")) if c >= 0]
         if stops:
             text = text[: min(stops)]
         print("=" * 66)
         print(f"CONVERSATION {i + 1}: {name}")
         print("=" * 66)
-        print(f"INPUT  [system]: You are {name.split(',')[0]}. Background: {bio}")
-        print(f"                 Current Location: {loc}")
-        print(f"                 Instructions: speak in character, stay conversational.")
+        print(f"INPUT  [card]: Description: {bio[:96]}...")
+        print(f"               Scenario: {loc}")
         print(f"INPUT  [player]: {q}")
-        print(f"OUTPUT [npc]:{text}")
+        print(f"OUTPUT [{name.split(',')[0]}]:{text}")
         print()
     print(f"[{b} streams x {n_tokens} tokens = {b * n_tokens} tokens in {dt:.2f}s "
           f"= {b * n_tokens / dt:.0f} tok/s aggregate on one 3060]")

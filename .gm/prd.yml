@@ -62,3 +62,11 @@
   subject: GRPO round 3 collapsed (no_stop 95%%, pass 2%%) after loss spikes +50; resp_lp sums logprobs over the response so doubling the window to 96 tokens doubled the policy-gradient scale; normalize per-token and retry from grpo2 at lower lr
   status: completed
   witness: per-token mean logprob + std-normalized advantage; round-3 retry loss +-0.07 vs +-50 pre-fix; grpo3n stable at 40%% pass, no collapse
+- id: fix-demo-ship
+  subject: 'npc_demo_batch.py hardcodes pre-ST checkpoint ple-npc-grpo3.pt and the old ### System format; point it at the ship checkpoint (env-overridable) and render ST-format prompts, then witness 10 conversations'
+  status: completed
+  witness: npc_demo_batch.py now defaults to runs/ple-st-r9-grpo2.pt (DEMO_CKPT overridable) with ST card prompts; witnessed 10 conversations end-to-end at 5507 tok/s aggregate on the 3060
+- id: fix-prompt-space
+  subject: 'inference prompts everywhere ended with Name: (no trailing space) while training rows use Name:<space>response -- off-distribution by one token; fixed in forge/GRPO/demo/diag probes; measure forge delta on grpo2 and one GRPO round with the corrected prompt'
+  status: completed
+  witness: 'three-way measurement: grpo2 no-space 46%% (best), grpo2 space 32%%, space-adapted r10 collapsed 4%%/no_stop 89%%; no-space prompt confirmed as deployment convention, edits reverted to the 46%% byte state, README documents the result'
