@@ -45,3 +45,9 @@
 - id: fix-forge-flywheel
   subject: st_forge_data.jsonl is written by the forge but consumed by nothing -- the INJECT stage is a dead letter; wire it into st_prepare.py behind the decontam filter and start the forge files fresh for the new era
   status: pending
+- id: lever-repetition
+  subject: r9-grpo forge shows 25% n-gram looping (The old road through x3) once the template died; add ngram_repeat penalty to GRPO reward and rerun; intent keys modernized to grounded style
+  status: pending
+- id: fix-grpo-norm
+  subject: GRPO round 3 collapsed (no_stop 95%%, pass 2%%) after loss spikes +50; resp_lp sums logprobs over the response so doubling the window to 96 tokens doubled the policy-gradient scale; normalize per-token and retry from grpo2 at lower lr
+  status: pending

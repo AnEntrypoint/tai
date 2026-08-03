@@ -42,12 +42,13 @@ QUESTIONS = {
 }
 
 INTENT_MAP = {
-    "identity": ["i am", "i'm", "my name", "they call me"],
+    "identity": ["i am", "i'm", "my name", "they call me", "call me", "the name is", "my trade", "my living"],
     "sale": INTENT_KEYS["What do you have for sale?"],
-    "quest": ["quest", "task", "help", "need", "work", "do that"],
-    "lore": ["story", "stories", "heard", "they say", "tale", "legend", "history"],
+    "quest": ["quest", "task", "help", "need", "work", "do that", "want", "bring", "find", "carried", "clear"],
+    "lore": ["story", "stories", "heard", "they say", "tale", "legend", "history",
+             "old road", "folk", "mill", "bell", "chapel", "comet", "keep", "winter", "mother swore"],
     "object": INTENT_KEYS["What do you have for sale?"] + ["it is", "this", "that"],
-    "place": ["here", "this place", "you stand", "village", "town", "city", "crossing"],
+    "place": ["here", "this place", "you stand", "village", "town", "city", "crossing", "friend"],
 }
 
 

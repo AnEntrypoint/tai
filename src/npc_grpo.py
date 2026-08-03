@@ -2,9 +2,11 @@
 
 Per prompt: sample K responses from the current policy, score each with the
 rule-based adherence reward (no invented names, no template echo, intent
-engagement, clean stop, non-trivial length), advantage = reward - group mean,
-and take a policy-gradient step on the sampled tokens' logprobs. No critic;
-a KL anchor to the frozen starting policy at tiny lr.
+engagement, clean stop, non-trivial length, no n-gram looping), advantage =
+(reward - group mean) / group std, and take a policy-gradient step on the
+sampled tokens' per-token mean logprob (length-normalized, so the objective
+scale does not grow with the generation window). No critic; a KL anchor to
+the frozen starting policy at tiny lr.
 
 Prompts are chosen by adaptive difficulty: each prompt's running pass rate
 (mean reward >= 3.0) is tracked and the sampler draws from prompts in the
@@ -29,7 +31,7 @@ from tokenizers import Tokenizer
 
 from model import Config, TinyLM
 from npc_eval import PERSONAS
-from npc_score import COMMON, INTENT_KEYS, TEMPLATE_ECHO, drift_names
+from npc_score import COMMON, INTENT_KEYS, TEMPLATE_ECHO, drift_names, ngram_repeat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOK = os.path.join(HERE, "..", "data", "bpe32768.json")
@@ -134,6 +136,8 @@ def reward_of(text, stopped, q, bio):
         r += 0.5
     if len(body) >= 24:
         r += 0.5
+    if ngram_repeat(body):
+        r -= 1.0
     return r
 
 
@@ -230,6 +234,7 @@ def main():
         adv = torch.tensor([r - mean_r for r in rewards], device=device, dtype=torch.float32)
         if adv.abs().max() < 1e-6:
             continue
+        adv = adv / (adv.std() + 1e-4)
 
         model.train()
         seq = torch.stack(seqs)
@@ -237,7 +242,7 @@ def main():
         logits, _ = model(inp)
         lp = F.log_softmax(logits.float(), dim=-1)
         tok_lp = lp.gather(-1, tgt.unsqueeze(-1)).squeeze(-1)
-        resp_lp = tok_lp[:, plen - 1:].sum(-1)
+        resp_lp = tok_lp[:, plen - 1:].mean(-1)
         with torch.no_grad():
             ref_logits, _ = ref(inp)
             ref_lp_full = F.log_softmax(ref_logits.float(), dim=-1)

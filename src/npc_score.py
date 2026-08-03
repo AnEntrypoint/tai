@@ -39,7 +39,7 @@ COMMON = {
 INTENT_KEYS = {
     "Hello there.": ["welcome", "well met", "greetings", "hello", "friend", "traveler", "visitor"],
     "What do you have for sale?": ["sale", "sell", "wares", "buy", "coin", "gold", "price", "offer", "goods", "stock", "deal", "trade"],
-    "Tell me about yourself.": ["i am", "i'm", "my name", "they call me", "i have", "i've", "my life", "my work", "my family"],
+    "Tell me about yourself.": ["i am", "i'm", "my name", "they call me", "call me", "the name is", "i have", "i've", "my life", "my work", "my family", "my trade", "my living"],
 }
 
 TEMPLATE_ECHO = ("i deal in what this place provides",
@@ -47,6 +47,15 @@ TEMPLATE_ECHO = ("i deal in what this place provides",
                  "you are a new friend",
                  "they say you ",
                  "the user is seeking")
+
+
+def ngram_repeat(text, n=3, max_count=2):
+    words = text.split()
+    if len(words) <= n + 2:
+        return False
+    from collections import Counter
+    grams = Counter(tuple(words[i:i + n]) for i in range(len(words) - n + 1))
+    return grams.most_common(1)[0][1] > max_count
 
 
 def drift_names(text, system_blob):

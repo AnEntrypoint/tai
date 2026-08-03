@@ -75,34 +75,64 @@ Each claim below has a number behind it, measured by `src/npc_forge.py`
 | template-heavy SFT | is a regression vector | card_continuation 1% -> 20% after one template-heavy top-up |
 | **GRPO (critic-free, DeepSeekMath-style)** | **identity + stopping** | **persona_swap -> 0.1-2%, no_stop 94% -> 2%, pass rate 3% -> 55%** |
 | world-DB grounded SFT | grounded onsets | answers open with real items at real prices (object_ungrounded 0.5%) |
+| **decontaminated data engine + anti-template GRPO** | **the actual ceiling removed** | **template_echo 81% -> 0%, honest pass 3% -> 30% -> 46% in two rounds** |
 
 The forge is the co-evolution loop: generate, grade (persona_swap, card
-continuation, intent, stop, grounding, repetition), inject repairs, retrain.
-An LLM judges the dashboards between rounds; the rule grader itself was
-caught over-firing once (83% "drift" that was really 1% persona swap).
+continuation, template echo, intent, stop, grounding, repetition), inject
+repairs, retrain. An LLM judges the dashboards between rounds; the rule
+grader itself was caught over-firing once (83% "drift" that was really 1%
+persona swap) and under-firing once (blind to template echo, below).
 
-## The scale assertion (what this arc actually measured)
+## The scale assertion, revised by measurement (round 9)
 
-1. **Form is data-solvable.** Format, turn structure, stopping, and
-   question-intent all yield to SFT with the right data shapes, fast.
-2. **Identity is reward-solvable, not data-solvable.** Across ~200M tokens
-   of every SFT variation tried, persona drift never went below ~20%. Three
-   hundred GRPO steps (sample K=8, rule-based reward, group-relative
-   advantage, no critic) took it to zero; a dedup penalty and KL anchor were
-   needed after round one reward-hacked into template collapse. This is the
-   RLAIF result reproduced at 28.9M parameters.
-3. **Content depth is capacity-bound.** Every round produces correct,
-   often DB-grounded onsets ("Hard cheese wheel, 10 gold") and then noise
-   within a sentence or two. 14 rounds and ~200M tokens did not move that
-   split. The 559K-param dense core can hold the *shape* of a SillyTavern
-   character but not a deep one. MLA and MoE do not apply at this size --
-   the PLE table already is the sparse-capacity trick. Assistant-axis-style
-   activation capping was considered and is superseded by the GRPO drift
-   fix (persona swap is 0.1-2% without it).
+The round-8 version of this section claimed content depth was
+capacity-bound at the 559K-param core. Round 9 falsified that: the plateau
+was not capacity, it was three missing levers, each found by adversarial
+diagnostics rather than by training harder:
 
-Ship checkpoint: `runs/ple-st-r8-grpo.pt` (world-DB grounded SFT + GRPO
-round 6): forge pass rate 55%, persona swap 1.5%, card continuation 0.2%,
-clean structural behavior across all 2400-rollout sweeps.
+1. **The training data contained the ceiling.** The synthetic generators
+   spliced raw second-person card scenario text into ~16 fixed response
+   templates; one skeleton ("I deal in what this place provides...") alone
+   occupied ~1,300 response slots in the bins. The model's "word salad"
+   was verbatim reproduction of the data's own template seams. A
+   combinatorial rewrite (opener x grounding x closer banks, world-DB
+   goods grounding, zero raw scenario splicing) plus a decontamination
+   filter removed all of it.
+2. **The grader and reward were blind to the failure.** The old forge
+   grader had no template-echo check, so the "55% pass" ship number was
+   mostly the reward being farmed by the memorized template. Measured
+   with the template-aware grader, the round-8 ship model passes 3%,
+   with 81% template echo. The decontaminated-data retrain plus two GRPO
+   rounds (template-echo penalty, run-global dedup, adaptive 15-85%
+   pass-zone prompt curriculum, n-gram repetition penalty) reached 46%
+   with 0% echo and 0.4% repetition on the same honest grader.
+3. **The RL objective destabilized silently.** Doubling the generation
+   window doubled the policy-gradient scale (logprobs were summed over
+   the response); round 3 collapsed (no_stop 95%) with loss spikes to
+   +50. Per-token mean logprob plus group-std advantage normalization
+   brought loss back to +/-0.1 and stabilized further rounds.
+
+**Identity is still reward-solvable** (persona_swap 0-1% throughout),
+**form is still data-solvable**, and the depth question is now open
+again: each round of the honest loop moves it, which is the signature of
+a lever problem, not a capacity wall. The 559K core's true ceiling, if
+it exists, has not yet been measured -- every previous "plateau" was an
+instrumentation or data artifact.
+
+Levers measured and rejected at this scale, for the record: Muon
+(Newton-Schulz orthogonalized momentum on the 2D core matrices) loses to
+AdamW at matched budget -- val 3.44 vs 2.90 at 800 steps / 13.1M tokens
+on identical bins (`--optimizer muon` remains in train.py for larger
+horizons where Muon's advantage is documented to appear). Decoding
+(temperature/top-k grid) moves nothing structural: the template onset
+was identical from greedy to t=0.9, which is what first proved the
+problem was in the data, not the sampler.
+
+Ship checkpoint: `runs/ple-st-r9-grpo2.pt` (decontaminated SFT + GRPO
+round 2): honest forge pass 46%, template_echo 0%, repetition 0.4%,
+persona_swap 0%, across 720-rollout sweeps on the template-aware grader.
+GRPO rounds past two oscillate (40-46%) -- saturation, not collapse;
+the normalized objective keeps them stable.
 
 In the runtime:
 
