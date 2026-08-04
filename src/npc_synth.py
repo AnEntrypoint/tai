@@ -168,3 +168,11 @@ def random_name():
 
 if __name__ == "__main__":
     main()
+
+# Production addition: Universal Agency tag forcing
+def force_agency_tags(response, action_type, target):
+    return f"{response} [{action_type.upper()}: {target}]"
+
+# Strategy Consolidation Hook
+def get_agency_priority():
+    return ['TRAVEL', 'TRADE', 'QUEST']
