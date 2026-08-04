@@ -90,3 +90,59 @@
   subject: 'forge passing rows are stored as single-exchange convos ending at the NPC turn, so flywheel SFT taught response->eot instead of response->Player: (r11 no_stop 43-46%% vs r9 1-8%%); write rows with the turn marker, repair existing st_forge_data.jsonl, rebuild, retrain'
   status: completed
   witness: forge writer now stores rows with the turn marker; 1720 existing rows repaired; r12 no_stop 43->33%%, r13 6%% after the added stop penalty; bins rebuilt each round (forge 878->3106 rows)
+- id: arc-dialog-only
+  subject: 'NPC outputs must be dialog only, no action asterisks: measure action-beat rate in data + model, strip from generators/forge data, add action_text flaw to grader and penalty to reward, retrain'
+  status: completed
+  witness: action-beats rate measured 92%% (r14) -> 0%% (r16, held r17) via beat stripping in st_prepare + action_text forge flaw + GRPO penalty
+- id: arc-action-triggers
+  subject: 'design + train machine-readable action outputs (e.g. [GOTO: place] only for known places, [USE: object] only when the object is really available in context); grader verifies against world DB; most efficient trigger encoding'
+  status: completed
+  witness: '[DEAL: item gold]/[GOTO: place] schema on own line, world-DB grounded, abstention cases trained, engine tolerance documented in README/AGENTS; emitting at 53%% (r16), accuracy iteration lever recorded'
+- id: arc-round-script
+  subject: one repeatable script driving a full training round (prepare -> SFT -> GRPO -> forge -> report) with instructions; every future round runs through it
+  status: completed
+  witness: src/round.py drove r16 end-to-end (prepare 27s, SFT, GRPO, forge, simeval logs + summary block); usage in traintai README
+- id: arc-economy-sim
+  subject: economy simulation where NPCs buy/sell/price/restock over time; the sim state gives a decision oracle -> synthetic gold choices per situation -> training data; bad model outputs become bad life decisions in-sim, tolerated and corrected
+  status: completed
+  witness: 'src/sim_econ.py: stock/demand/markup/haggle-floor oracle; 2999 convos (715 DEAL/526 GOTO/0 beats) + 300 held-out + 150 GRPO scenarios, disjoint seeds'
+- id: arc-sim-eval
+  subject: 'test harness for simulation-format adherence: respond vs interact distinction, format compliance rate, good-choice rate vs oracle; runs every round'
+  status: completed
+  witness: src/sim_eval.py separates format/beats/invalid/oracle-none-GOTO-DEAL; run on r14 (baseline), r16, r17 with per-round comparisons recorded
+- id: arc-continual-balance
+  subject: 'balanced continual state: interleave corrected sim output with general/RP data to prevent overfit; genuine-self-improvement test in runtime (held-out sim scenarios each round, must improve not just fit)'
+  status: completed
+  witness: mixture interleaves sim+world+real+authored+template+tinystories each build; held-out disjoint-seed eval gates genuine improvement; protocol in AGENTS.md max-progress-first section
+- id: arc-repo-split
+  subject: 'split repos: this repo = inference; AnEntrypoint/traintai = training material (data, generators, sim, training scripts); traintai as a submodule of the inference repo'
+  status: completed
+  witness: AnEntrypoint/traintai created and pushed (166MB training tree, CI workflow); tai removed the training tree and consumes it as submodule at traintai/ (e7fafa42); build+verify PASS
+- id: arc-diminishing-protocol
+  subject: 'max-progress-first scheduling: always train the lever with the largest measured headroom, switch when roughly maxed, revisit later to check unlocked gains; document the protocol and current lever ranking'
+  status: completed
+  witness: max-progress-first protocol documented in AGENTS.md with current lever ranking; r15 flat = prepared saturation measured; r17 overshoot recorded with the partial-credit follow-up lever
+- id: arc-agents-levers
+  subject: 'AGENTS.md living document: primary discovered levers per process part (data, reward, schedule, sim, eval), updated every round; infer likely-next levers from historical successes'
+  status: completed
+  witness: 'traintai/AGENTS.md: 10 measured levers, inferred next levers, sim arc, colab lessons + anti-patterns, r17 result, gains projection (pushed 62897eb, submodule pointer 0082b1fa)'
+- id: arc-web-research
+  subject: web research pass on game-NPC action schemas / economy sims for small LMs (inspiration for trigger encoding + sim design), findings folded into arc-action-triggers and arc-economy-sim
+  status: completed
+  witness: 'research report folded into design: ReAct/IF bracket verbs, SayCan affordance grounding, Toolformer command-rate balance, Gorilla AST eval, Concordia engine-as-referee, Octopus v2 special tokens (parked lever)'
+- id: arc-gains-projection
+  subject: project expected gains from further prepared training vs sim self-improvement, from measured round deltas; written into AGENTS.md and README
+  status: completed
+  witness: 'projection section in traintai/AGENTS.md: prepared recipe saturated (74->73%% flat), dialog-only done, action accuracy open (expected 50%%+ in 2-3 rounds per intent-lever precedent), chain depth next'
+- id: lever-action-reward
+  subject: 'r16: dialog-only solved (92->0%%) but oracle GOTO 9%%/DEAL 5%%/abstain 71%% -- GRPO reward cannot see action correctness and sim prompts are not in the pool; add oracle-labeled sim prompts to GRPO with action match/abstention reward terms'
+  status: completed
+  witness: oracle sim prompts + action terms shipped in npc_grpo (r17 run); measured overshoot to abstention (GOTO/DEAL 0%%, forge 66%%); r16 kept ship; partial-credit v2 recorded in AGENTS.md as the follow-up
+- id: arc-world-expansion
+  subject: 'adopt from accelerated-runs notebook: procedural world scale -- adjectivexnoun items WITH real property+provenance detail structure (not filler text), REGIONS + procedural locations for GOTO diversity, year-tagged EVENTS for lore; filler descriptions and random-choice decisions explicitly rejected'
+  status: completed
+  witness: 'st_world.py: 10 year-tagged EVENTS, ORIGIN_PLACE, LINEAGE, EXPANDED_ITEMS (150 items, 4 variants each with structured property+provenance, fixed seed); st_data/sim_eval/sim_econ consume it; filler descriptions rejected per plan'
+- id: arc-living-world
+  subject: 'LivingWorld v2: peer NPC sim (gold/inventory/needs/scarcity) with UTILITY-oracle decisions (buy below fair, sell above, gather scarce, move to demand) -- extends sim_econ from single-shop to orchestrated economy; emits correct-choice conversations'
+  status: completed
+  witness: scarcity World in sim_econ (stock ticks, narratable reasons cited in 526 convos, lineage texture in 137) + restock supplier chains (234 convos, item->origin-place->reward->[GOTO] oracle); deep spatial/territory sim recorded as future lever, random-choice oracles rejected
