@@ -27,7 +27,6 @@ videos/
 *.MP4
 
 target/
-.env
 
 .gm/exec-spool/
 .gm/witness/
@@ -46,3 +45,5 @@ target/
 .gm/residual-check-fired
 .agentplug/
 .agentplug-kv/
+config.bat
+node_modules
